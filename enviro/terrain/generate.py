@@ -1,0 +1,361 @@
+import random
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from ..config import load_config
+from .catalogue import terrain
+from .features import Poi, Station, place_stations
+from .field import TerrainField
+from .grid import Cell, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
+from .instance import Map, MapParams
+
+
+MAX_AXIS = 64
+
+
+@dataclass(frozen=True)
+class InstanceParams:
+    """What varies between instances of the same config.
+
+    Deliberately short: the knobs an experiment sweeps. Terrain costs, station
+    presets and the shape of the noise field stay in ``config/default.json``,
+    so the family of instances remains explicit and reviewable rather than
+    hidden in keyword arguments.
+
+    Attributes:
+        width: Grid extent on x.
+        height: Grid extent on y.
+        depth: Vertical layers.
+        block_rate: Probability of a boulder per cell, in [0, 1].
+        poi_count: Number of points of interest.
+        station_count: Stations to place, 1 or 2. Two is the interesting case,
+            because a weak relay covers only part of what the base covers.
+        seed: Seed for the whole instance. None means an unseeded map.
+        config_path: Alternate configuration file.
+    """
+    width: int = 12
+    height: int = 12
+    depth: int = 3
+    block_rate: float = 0.06
+    poi_count: int = 3
+    station_count: int = 2
+    seed: Optional[int] = None
+    config_path: Optional[Path] = None
+
+    def __post_init__(self) -> None:
+        for name in ("width", "height", "depth"):
+            value = getattr(self, name)
+            if not 1 <= value <= MAX_AXIS:
+                raise ValueError(f"{name} must be in [1, {MAX_AXIS}], got {value}")
+        if not 0.0 <= self.block_rate <= 1.0:
+            raise ValueError(f"block_rate must be in [0, 1], got {self.block_rate}")
+        if self.poi_count < 0:
+            raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
+        if self.station_count not in (1, 2):
+            raise ValueError(
+                f"station_count must be 1 or 2, got {self.station_count}. Three "
+                f"stations is a different problem, not a different instance."
+            )
+        if self.seed is not None and not isinstance(self.seed, int):
+            raise ValueError(f"seed must be an int or None, got {type(self.seed).__name__}")
+
+    @classmethod
+    def from_config(cls, path: Optional[Path] = None, **overrides) -> "InstanceParams":
+        """Take the instance fields from a JSON file, then apply overrides.
+
+        Args:
+            path: Alternate config file. Defaults to ``config/default.json``.
+            **overrides: Any field of this class, which wins over the file.
+
+        Returns:
+            Validated parameters.
+        """
+        config = load_config(path)
+        values: Dict[str, object] = {
+            "width": config["map"]["width"],
+            "height": config["map"]["height"],
+            "depth": config["map"]["depth"],
+            "block_rate": config["map"]["block_rate"],
+            "poi_count": config["poi"]["count"],
+            "station_count": len(config["network"]["stations"]),
+            "config_path": path,
+        }
+        values.update(overrides)
+        return cls(**values)  # type: ignore[arg-type]
+
+
+class MapGenerator:
+    """Builds :class:`~enviro.terrain.instance.Map` instances.
+
+    Attributes:
+        params: Instance parameters.
+        config: The parsed configuration in force.
+        field: The terrain field in force, rebuilt by every :meth:`create`.
+        map_params: The resolved spec handed to each map.
+    """
+
+    def __init__(self, params: Optional[InstanceParams] = None,
+                 seed: Optional[int] = None) -> None:
+        self.params = params or InstanceParams.from_config()
+        if seed is not None:
+            self.params = replace(self.params, seed=seed)
+        self.config = load_config(self.params.config_path)
+        self.rng = random.Random(self.params.seed)
+        self.field = self._build_field()
+        self.map_params = self._map_params()
+
+    # public API
+
+    def create(self) -> Map:
+        """Generate one map.
+
+        The RNG is re-seeded and the field is rebuilt on every call, so
+        ``create()`` is idempotent: the same generator hands out the same map
+        as many times as needed. The rebuild matters because the field's phase
+        offset is the first thing the seed draws; leaving it behind from
+        construction time would make the second call a different map.
+        """
+        self.rng = random.Random(self.params.seed)
+        self.field = self._build_field()
+        cells = self._place_terrain()
+        self._place_boulders(cells)
+        stations = self._place_stations(cells)
+        pois = self._place_pois(cells)
+        return Map(self.map_params, cells, stations, pois)
+
+    def create_from_seed(self, seed: int, **overrides) -> Map:
+        """Generate a map for one seed.
+
+        Args:
+            seed: Seed to use.
+            **overrides: Parameter overrides for this call only.
+
+        Returns:
+            A generated map.
+        """
+        return MapGenerator(replace(self.params, seed=seed, **overrides)).create()
+
+    def batch(self, seeds: Iterable[int], **overrides) -> List[Map]:
+        """Generate one map per seed.
+
+        This is what a comparison over instances consumes: a family drawn from
+        a single parameter setting, one per seed.
+
+        Args:
+            seeds: Seeds to draw.
+            **overrides: Parameter overrides applied to every map.
+
+        Returns:
+            One map per seed, in order.
+        """
+        return [self.create_from_seed(seed, **overrides) for seed in seeds]
+
+    def describe(self) -> str:
+        """One line naming the family this generator draws from."""
+        p = self.params
+        return (f"{p.width}x{p.height}x{p.depth} blocks={p.block_rate} "
+                f"pois={p.poi_count} stations={p.station_count} seed={p.seed}")
+
+    #  parameters 
+
+    def _build_field(self) -> TerrainField:
+        """The terrain field, with this instance's phase offset already drawn."""
+        origin = (
+            self.rng.uniform(0.0, self.params.width),
+            self.rng.uniform(0.0, self.params.height),
+        )
+        return TerrainField(
+            self.params.width,
+            self.params.height,
+            self.params.depth,
+            origin=origin,
+            settings=self.config["generation"],
+        )
+
+    def _map_params(self) -> MapParams:
+        """Project the config and the instance params onto the frozen spec."""
+        movement = self.config["movement"]
+        poi = self.config["poi"]
+        rover = self.config["rover"]
+        stations = tuple(
+            (str(s["id"]), float(s["radius"]), float(s["signal"]))
+            for s in self.config["network"]["stations"][: self.params.station_count]
+        )
+        return MapParams(
+            width=self.params.width,
+            height=self.params.height,
+            depth=self.params.depth,
+            block_rate=self.params.block_rate,
+            move_radius=float(movement["radius"]),
+            climb_penalty=float(movement["climb_penalty"]),
+            poi_count=self.params.poi_count,
+            poi_min_visibility=float(poi["min_visibility"]),
+            stations=stations,
+            battery=float(rover["battery"]),
+            memory=float(rover["memory"]),
+            seed=self.params.seed,
+        )
+
+    # construction 
+
+    def _place_terrain(self) -> Dict[str, Cell]:
+        """One cell per grid position, terrain from the field."""
+        cells: Dict[str, Cell] = {}
+        for z in range(self.params.depth):
+            for x in range(self.params.width):
+                for y in range(self.params.height):
+                    id_ = cell_id(x, y, z)
+                    cells[id_] = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
+        return cells
+
+    def _place_boulders(self, cells: Dict[str, Cell]) -> None:
+        """Block cells independently with probability ``block_rate``.
+
+        Independent per cell on purpose. Boulder fields clump in reality, but a
+        clumped rule needs another knob and another thing to calibrate, and
+        the connectivity guarantee in step 4 already keeps the map solvable
+        whatever the draw does.
+        """
+        for cell in cells.values():
+            cell.blocked = self.rng.random() < self.params.block_rate
+
+    def _place_stations(self, cells: Dict[str, Cell]) -> Tuple[Station, ...]:
+        """Place stations on the surface, as far apart as the map allows."""
+        presets = self.map_params.stations
+        candidates = self._surface_cells(cells)
+        if not candidates:
+            raise ValueError(
+                "every surface cell is blocked; lower block_rate or enlarge the map"
+            )
+
+        centers = [self.rng.choice(candidates).pos]
+        if len(presets) > 1:
+            farthest = max(candidates, key=lambda c: (distance(c.pos, centers[0]), c.id))
+            centers.append(farthest.pos)
+
+        return place_stations(presets, tuple(centers), self.map_params.diagonal)
+
+    def _place_pois(self, cells: Dict[str, Cell]) -> List[Poi]:
+        """Place points of interest on reachable, observable, well-spread ground.
+
+        Three rules, all about instance quality rather than realism:
+
+        * **Reachable from the surface.** Nothing interesting is walled off.
+        * **Observable.** Some cell next to it has ground clear enough to see
+          it from, checked with the true terrain because nothing is surveyed
+          yet at generation time.
+        * **Spread.** One per layer first, so depth has to be descended into,
+          and each one placed as far from the others as the map allows. Two
+          points of interest a cell apart are one trip, not two.
+        """
+        threshold = self.map_params.poi_min_visibility
+        candidates = self._observable_cells(cells, threshold)
+        by_layer: Dict[int, List[str]] = {}
+        for id_ in sorted(candidates):
+            by_layer.setdefault(parse_cell_id(id_)[2], []).append(id_)
+
+        chosen: List[str] = []
+        for layer in sorted(by_layer):
+            if len(chosen) >= self.params.poi_count:
+                break
+            chosen.append(self._farthest(cells, by_layer[layer], chosen))
+        spare = [id_ for ids in by_layer.values() for id_ in ids if id_ not in chosen]
+        self.rng.shuffle(spare)
+        while spare and len(chosen) < self.params.poi_count:
+            pick = self._farthest(cells, spare, chosen, exclude=chosen)
+            chosen.append(pick)
+            spare.remove(pick)
+
+        if len(chosen) < self.params.poi_count:
+            raise ValueError(
+                f"only {len(chosen)} cells can host an observable point of "
+                f"interest but poi_count is {self.params.poi_count}. Lower "
+                f"block_rate, enlarge the map, or ask for fewer points."
+            )
+
+        pois: List[Poi] = []
+        for index, id_ in enumerate(chosen):
+            poi = Poi(f"poi_{index}", id_, threshold)
+            cells[id_].poi_id = poi.id
+            pois.append(poi)
+        return pois
+
+    def _observable_cells(self, cells: Dict[str, Cell], threshold: float) -> Set[str]:
+        """Reachable cells that something can be observed from.
+
+        Reachability comes from the map's own flood fill, so the guarantee is
+        computed with the same rule a consumer would use, not a second
+        approximation of it.
+        """
+        offsets = neighbour_offsets(self.map_params.move_radius)
+        starts = [
+            cell_id(x, y, 0)
+            for x in range(self.params.width)
+            for y in range(self.params.height)
+            if cells[cell_id(x, y, 0)].traversable
+        ]
+        reachable = reachable_cells(cells, starts, offsets)
+
+        observable: Set[str] = set()
+        for id_ in reachable:
+            cell = cells[id_]
+            if cell.poi_id:
+                continue
+            x, y, z = cell.pos
+            for dx, dy, dz in offsets:
+                vantage = cells.get(cell_id(x + dx, y + dy, z + dz))
+                if vantage is None or not vantage.traversable:
+                    continue
+                if terrain(vantage.true_terrain).visibility >= threshold:
+                    observable.add(id_)
+                    break
+        return observable
+
+    def _farthest(
+        self,
+        cells: Dict[str, Cell],
+        candidates: Sequence[str],
+        chosen: Sequence[str],
+        exclude: Optional[Sequence[str]] = None,
+    ) -> str:
+        """Candidate furthest from the points of interest already placed.
+
+        Ties go to the RNG, so two seeds do not both get the same corner. With
+        nothing placed yet the draw is uniform.
+        """
+        pool = [id_ for id_ in candidates if not exclude or id_ not in exclude]
+        if not pool:
+            raise ValueError("no candidate left to place a point of interest on")
+        if not chosen:
+            return self.rng.choice(pool)
+        placed = [parse_cell_id(id_) for id_ in chosen]
+        scored = [
+            (min(distance(parse_cell_id(id_), pos) for pos in placed), id_)
+            for id_ in pool
+        ]
+        best = max(score for score, _ in scored)
+        return self.rng.choice([id_ for score, id_ in scored if score == best])
+
+    def _surface_cells(self, cells: Dict[str, Cell]) -> List[Cell]:
+        """Traversable cells on the top layer, in a stable order."""
+        return [
+            cells[cell_id(x, y, 0)]
+            for x in range(self.params.width)
+            for y in range(self.params.height)
+            if not cells[cell_id(x, y, 0)].blocked
+        ]
+
+    def __repr__(self) -> str:
+        return f"MapGenerator(seed={self.params.seed})"
+
+
+def generate(seed: int, **overrides) -> Map:
+    """Generate one map for a seed.
+
+    Example:
+        >>> a = generate(42)
+        >>> b = generate(42)
+        >>> a.summary() == b.summary()
+        True
+    """
+    return MapGenerator(InstanceParams.from_config(seed=seed, **overrides)).create()
