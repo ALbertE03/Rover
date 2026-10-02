@@ -25,7 +25,7 @@ def section(title: str) -> None:
 
 def demo_1_one_map() -> None:
     banner("1. One map")
-    terrain_map = generate(seed=42)
+    terrain_map = generate(seed=42,width=64,height=5,depth=3)
     print(terrain_map.summary())
     print()
     print(terrain_map.render())
@@ -146,6 +146,7 @@ def demo_6_sweeps() -> None:
         ("grid 16x16x4", dict(width=16, height=16, depth=4)),
         ("one station", dict(station_count=1)),
         ("six points", dict(poi_count=6)),
+        ("grid_64x64x3",dict(width=64, height=64, depth=3,station_count=1,poi_count=10))
     ]:
         maps = MapGenerator().batch(range(10), **overrides)
         cells = sum(len(m.cells) for m in maps) / len(maps)

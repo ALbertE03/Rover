@@ -2,7 +2,7 @@ import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
-from ..config import load_config
+from ..config import load_config,get
 from .catalogue import terrain
 from .features import Poi, Station, place_stations
 from .field import TerrainField
@@ -10,8 +10,8 @@ from .grid import Cell, cell_id, distance, neighbour_offsets, parse_cell_id, rea
 from .instance import Map, MapParams
 
 
-MAX_AXIS = 64
-
+MAX_AXIS = get("map").get("max_axis",64) 
+MIN_AXIS = get("map").get("min_axis",5)
 
 @dataclass(frozen=True)
 class InstanceParams:
@@ -43,12 +43,14 @@ class InstanceParams:
     config_path: Optional[Path] = None
 
     def __post_init__(self) -> None:
-        for name in ("width", "height", "depth"):
+        for name in ("width", "height"):
             value = getattr(self, name)
-            if not 1 <= value <= MAX_AXIS:
-                raise ValueError(f"{name} must be in [1, {MAX_AXIS}], got {value}")
+            if not MIN_AXIS <= value <= MAX_AXIS:
+                raise ValueError(f"{name} must be in [{MIN_AXIS}, {MAX_AXIS}], got {value}")
         if not 0.0 <= self.block_rate <= 1.0:
             raise ValueError(f"block_rate must be in [0, 1], got {self.block_rate}")
+        if self.depth < 0:
+            raise ValueError(f"depth must be >= 0, got {self.depth}")
         if self.poi_count < 0:
             raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
         if self.station_count not in (1, 2):
