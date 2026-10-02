@@ -1,0 +1,9 @@
+
+tests/
+.venv
+.env
+__pycache__/
+
+*.lock
+
+.DS_Store
