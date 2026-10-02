@@ -1,48 +1,83 @@
 {
   "map": {
+    "max_axis": 64,
+    "min_axis": 5,
     "width": 12,
     "height": 12,
     "depth": 3,
     "block_rate": 0.06
   },
-
   "terrain": {
-    "plain":    { "cost": 1.0, "visibility": 0.90, "glyph": "." },
-    "sand":     { "cost": 1.5, "visibility": 0.75, "glyph": ":" },
-    "rock":     { "cost": 2.2, "visibility": 0.60, "glyph": "#" },
-    "crevasse": { "cost": 3.2, "visibility": 0.35, "glyph": "/" }
+    "plain": {
+      "cost": 1.0,
+      "visibility": 0.90,
+      "glyph": "."
+    },
+    "sand": {
+      "cost": 1.5,
+      "visibility": 0.75,
+      "glyph": ":"
+    },
+    "rock": {
+      "cost": 2.2,
+      "visibility": 0.60,
+      "glyph": "#"
+    },
+    "crevasse": {
+      "cost": 3.2,
+      "visibility": 0.35,
+      "glyph": "/"
+    }
   },
-
   "generation": {
     "noise_scale": 2,
     "noise_octaves": 3,
-    "axis_weights": { "x": 0.5, "y": 0.5 },
+    "axis_weights": {
+      "x": 0.5,
+      "y": 0.5
+    },
     "depth_slope": 0.2,
     "bands": [
-      { "max": 0.55, "terrain": "plain" },
-      { "max": 0.72, "terrain": "sand" },
-      { "max": 0.88, "terrain": "rock" },
-      { "max": 1.00, "terrain": "crevasse" }
+      {
+        "max": 0.55,
+        "terrain": "plain"
+      },
+      {
+        "max": 0.72,
+        "terrain": "sand"
+      },
+      {
+        "max": 0.88,
+        "terrain": "rock"
+      },
+      {
+        "max": 1.00,
+        "terrain": "crevasse"
+      }
     ]
   },
-
   "movement": {
     "radius": 1.0,
     "climb_penalty": 0.6
   },
-
   "network": {
     "stations": [
-      { "id": "base",  "radius": 5.0, "signal": 1.0 },
-      { "id": "relay", "radius": 3.0, "signal": 0.8 }
+      {
+        "id": "base",
+        "radius": 5.0,
+        "signal": 1.0
+      },
+      {
+        "id": "relay",
+        "radius": 3.0,
+        "signal": 0.8
+      }
     ]
   },
-
   "poi": {
     "count": 3,
     "min_visibility": 0.7
   },
-
   "rover": {
     "battery": 75.0,
     "memory": 2.0
