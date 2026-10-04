@@ -234,16 +234,26 @@ class Map:
     #  knowledge 
 
     def survey_radius_at(self, cell: Cell) -> float:
-        """Radio de descubrimiento desde una celda: a mayor altura, más se ve.
+        """Radio de descubrimiento desde una celda.
 
-        En z=0 es move_radius (como antes). En la cima (z=depth-1) es
-        move_radius + survey_height_bonus. Así se mantiene la visibilidad
-        en el mismo nivel y aumenta con la altura porque se ve más lejos.
+        Dos factores, ambos sobre el observador:
+
+        * **Altura:** en z=0 es move_radius; en la cima (z=depth-1) es
+          move_radius + survey_height_bonus. A mayor altura, más se ve.
+        * **Visibilidad del propio terreno:** el radio se multiplica por la
+          visibilidad del suelo que se pisa (la misma que decide si un POI es
+          legible). En llano despejado se aprovecha todo; en una grieta
+          (crevasse) se ve poco aunque se esté alto: el mejor mirador no sirve
+          si el suelo no deja ver a través.
+
+        Se usa el terreno real: el observador sabe qué pisa.
         """
         if self.params.depth <= 1:
-            return self.params.move_radius
-        frac = cell.pos[2] / max(1, self.params.depth - 1)
-        return self.params.move_radius + self.params.survey_height_bonus * frac
+            base = self.params.move_radius
+        else:
+            frac = cell.pos[2] / max(1, self.params.depth - 1)
+            base = self.params.move_radius + self.params.survey_height_bonus * frac
+        return base * terrain(cell.true_terrain).visibility
 
     def _around_survey(self, cell: Cell) -> List[Cell]:
         """Celdas dentro del radio de descubrimiento (depende de la altura)."""
@@ -262,9 +272,9 @@ class Map:
     def survey(self, id_: str) -> List[str]:
         """Reveal the terrain around a cell and report what was revealed.
 
-        El radio crece con la altura: a mayor altura, más celdas se
-        descubren al avanzar. En la base es move_radius, en la cima es
-        move_radius + survey_height_bonus.
+        El radio crece con la altura y con la visibilidad del propio terreno:
+        a mayor altura, más celdas se descubren al avanzar; en terreno despejado
+        se aprovecha todo el radio, en grietas se ve poco aunque se esté alto.
 
         Args:
             id_: Cell to observe from. Unknown ids reveal nothing.
