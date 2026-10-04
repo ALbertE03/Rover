@@ -283,7 +283,14 @@ class MapGenerator:
             by_layer.setdefault(parse_cell_id(id_)[2], []).append(id_)
 
         chosen: List[str] = []
-        for layer in sorted(by_layer):
+        # Las capas compiten por interés: la más interesante aporta el primer
+        # POI. Así, con más capas que POIs, los puntos caen donde el costo y
+        # la recompensa están, no en las capas bajas por defecto.
+        layer_interest = {
+            layer: max(self._interest(cells[id_]) for id_ in ids)
+            for layer, ids in by_layer.items()
+        }
+        for layer in sorted(by_layer, key=lambda l: (-layer_interest[l], l)):
             if len(chosen) >= self.params.poi_count:
                 break
             chosen.append(self._best(cells, by_layer[layer], chosen))
