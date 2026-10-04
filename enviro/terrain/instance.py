@@ -20,6 +20,10 @@ class MapParams:
         block_rate: Probability of a boulder per cell, in [0, 1].
         move_radius: Reach of one step, in grid units.
         climb_penalty: Extra cost per level gained, on top of terrain cost.
+        survey_height_bonus: Extra survey radius at max height. At z=0 the
+            survey radius is move_radius; at z=depth-1 it is
+            move_radius + survey_height_bonus. A mayor altura, más celdas
+            se descubren al avanzar.
         poi_count: Number of points of interest.
         poi_min_visibility: Visibility the observer's ground needs.
         stations: ``(id, radius, signal)`` per station.
@@ -38,6 +42,7 @@ class MapParams:
     stations: Tuple[Tuple[str, float, float], ...]
     battery: float
     memory: float
+    survey_height_bonus: float = 2.0
     seed: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -51,6 +56,8 @@ class MapParams:
             raise ValueError(f"move_radius must be > 0, got {self.move_radius}")
         if self.climb_penalty < 0:
             raise ValueError(f"climb_penalty must be >= 0, got {self.climb_penalty}")
+        if self.survey_height_bonus < 0:
+            raise ValueError(f"survey_height_bonus must be >= 0, got {self.survey_height_bonus}")
         if self.poi_count < 0:
             raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
         if not 0.0 <= self.poi_min_visibility <= 1.0:
@@ -212,12 +219,38 @@ class Map:
 
     #  knowledge 
 
+    def survey_radius_at(self, cell: Cell) -> float:
+        """Radio de descubrimiento desde una celda: a mayor altura, más se ve.
+
+        En z=0 es move_radius (como antes). En la cima (z=depth-1) es
+        move_radius + survey_height_bonus. Así se mantiene la visibilidad
+        en el mismo nivel y aumenta con la altura porque se ve más lejos.
+        """
+        if self.params.depth <= 1:
+            return self.params.move_radius
+        frac = cell.pos[2] / max(1, self.params.depth - 1)
+        return self.params.move_radius + self.params.survey_height_bonus * frac
+
+    def _around_survey(self, cell: Cell) -> List[Cell]:
+        """Celdas dentro del radio de descubrimiento (depende de la altura)."""
+        radius = self.survey_radius_at(cell)
+        offsets = neighbour_offsets(radius)
+        x, y, z = cell.pos
+        return [
+            other
+            for other in (
+                self.cells.get(cell_id(x + dx, y + dy, z + dz))
+                for dx, dy, dz in offsets
+            )
+            if other is not None
+        ]
+
     def survey(self, id_: str) -> List[str]:
         """Reveal the terrain around a cell and report what was revealed.
 
-        A rover standing somewhere sees its immediate surroundings, and that is
-        the only way knowledge grows in this model. Boulders are excluded:
-        they are visible from anywhere, so there is nothing to learn about them.
+        El radio crece con la altura: a mayor altura, más celdas se
+        descubren al avanzar. En la base es move_radius, en la cima es
+        move_radius + survey_height_bonus.
 
         Args:
             id_: Cell to observe from. Unknown ids reveal nothing.
@@ -229,7 +262,7 @@ class Map:
         if cell is None:
             return []
         revealed = []
-        for other in [cell, *self._around(cell)]:
+        for other in [cell, *self._around_survey(cell)]:
             if not other.surveyed:
                 other.survey()
                 revealed.append(other.id)

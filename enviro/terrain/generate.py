@@ -195,6 +195,7 @@ class MapGenerator:
             stations=stations,
             battery=float(rover["battery"]),
             memory=float(rover["memory"]),
+            survey_height_bonus=float(movement.get("survey_height_bonus", 2.0)),
             seed=self.params.seed,
         )
 

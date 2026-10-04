@@ -1,3 +1,4 @@
+import random
 from typing import Dict, List, Optional, Tuple
 from ..config import get
 from .catalogue import terrain_names
@@ -35,6 +36,8 @@ class TerrainField:
         self.height_scale = 2
         self.height_octaves = 1
         self.height_smooth_passes = 2
+        self.height_subhill_rate = 0.08
+        self.height_peak_keep_rate = 0.3
         self._heightmap: Optional[List[List[int]]] = None
         self._configure(settings if settings is not None else get("generation"))
 
@@ -50,6 +53,8 @@ class TerrainField:
         self.height_scale = settings.get("height_scale", 2)
         self.height_octaves = settings.get("height_octaves", 1)
         self.height_smooth_passes = settings.get("height_smooth_passes", 2)
+        self.height_subhill_rate = float(settings.get("height_subhill_rate", 0.08))
+        self.height_peak_keep_rate = float(settings.get("height_peak_keep_rate", 0.3))
         self._validate()
 
     def _validate(self) -> None:
@@ -87,6 +92,14 @@ class TerrainField:
                 or not 0 <= self.height_smooth_passes <= 5):
             raise ValueError(
                 f"generation.height_smooth_passes must be an integer in [0, 5], got {self.height_smooth_passes!r}"
+            )
+        if not 0.0 <= self.height_subhill_rate <= 1.0:
+            raise ValueError(
+                f"generation.height_subhill_rate must be in [0, 1], got {self.height_subhill_rate!r}"
+            )
+        if not 0.0 <= self.height_peak_keep_rate <= 1.0:
+            raise ValueError(
+                f"generation.height_peak_keep_rate must be in [0, 1], got {self.height_peak_keep_rate!r}"
             )
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
@@ -159,9 +172,12 @@ class TerrainField:
                 raw[x][y] = max(0, min(self.depth - 1, h))
         for _ in range(self.height_smooth_passes):
             raw = self._median_smooth(raw)
+        # Quita picos aislados pero no todos: keeps peak_keep_rate de ellos.
+        # Determinista por semilla (via origin) para que el mapa sea reproducible.
+        rng = random.Random(int(self.origin[0] * 1000 + self.origin[1] * 1000 + self.width * 131 + self.height * 17))
         for _ in range(3):
-            changed = False
             nxt = [row[:] for row in raw]
+            changed = False
             for x in range(self.width):
                 for y in range(self.height):
                     h = raw[x][y]
@@ -176,11 +192,31 @@ class TerrainField:
                             if 0 <= nx < self.width and 0 <= ny < self.height:
                                 neigh.append(raw[nx][ny])
                     if neigh and h > max(neigh):
+                        # pico de 1 celda: lo conservamos con prob. keep_rate
+                        if rng.random() < self.height_peak_keep_rate:
+                            continue
                         nxt[x][y] = max(neigh)
                         changed = True
             raw = nxt
             if not changed:
                 break
+        # Sublomitas: encima de una loma puede haber otra lomita.
+        # Con prob. subhill_rate, levanta un bloque 2x2 en +1 (sin pasar depth-1).
+        # Solo sobre lomas existentes (h>0) para que sea "encima de la loma".
+        if self.height_subhill_rate > 0 and self.depth > 1:
+            for x in range(self.width - 1):
+                for y in range(self.height - 1):
+                    if rng.random() >= self.height_subhill_rate:
+                        continue
+                    base = min(raw[x][y], raw[x + 1][y], raw[x][y + 1], raw[x + 1][y + 1])
+                    if base <= 0 or base >= self.depth - 1:
+                        continue
+                    # que sea meseta: las 4 celdas a la misma altura
+                    if not (raw[x][y] == raw[x + 1][y] == raw[x][y + 1] == raw[x + 1][y + 1]):
+                        continue
+                    for dx in (0, 1):
+                        for dy in (0, 1):
+                            raw[x + dx][y + dy] = min(self.depth - 1, base + 1)
         return raw
 
     def _median_smooth(self, hm: List[List[int]]) -> List[List[int]]:

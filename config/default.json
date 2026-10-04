@@ -24,8 +24,10 @@
     ],
     "depth_slope": 0.2,
     "height_octaves": 1,
+    "height_peak_keep_rate": 0.3,
     "height_scale": 2,
     "height_smooth_passes": 2,
+    "height_subhill_rate": 0.08,
     "noise_octaves": 3,
     "noise_scale": 2
   },
@@ -39,7 +41,8 @@
   },
   "movement": {
     "climb_penalty": 0.6,
-    "radius": 1.8
+    "radius": 1.8,
+    "survey_height_bonus": 2.0
   },
   "network": {
     "stations": [
