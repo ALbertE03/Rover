@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from ..config import load_config,get
-from .catalogue import terrain
+from .catalogue import terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
 from .grid import Cell, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
@@ -192,6 +192,8 @@ class MapGenerator:
             climb_penalty=float(movement["climb_penalty"]),
             poi_count=self.params.poi_count,
             poi_min_visibility=float(poi["min_visibility"]),
+            poi_interest_climb_weight=float(poi.get("interest_climb_weight", 0.6)),
+            poi_interest_ground_weight=float(poi.get("interest_ground_weight", 0.4)),
             stations=stations,
             battery=float(rover["battery"]),
             memory=float(rover["memory"]),
@@ -259,12 +261,17 @@ class MapGenerator:
     def _place_pois(self, cells: Dict[str, Cell]) -> List[Poi]:
         """Place points of interest on reachable, observable, well-spread ground.
 
-        Three rules, all about instance quality rather than realism:
+        Four rules, all about instance quality rather than realism:
 
         * **Reachable from the surface.** Nothing interesting is walled off.
         * **Observable.** Some cell next to it has ground clear enough to see
           it from, checked with the true terrain because nothing is surveyed
           yet at generation time.
+        * **Interesting.** Costly to reach, rewarding to hold: high ground
+          costs climbing but pays back survey radius; expensive terrain costs
+          battery to stand on. Each layer contributes its most interesting
+          candidate, so the bill differs per point instead of every point
+          costing the same trip.
         * **Spread.** One per layer first, so depth has to be descended into,
           and each one placed as far from the others as the map allows. Two
           points of interest a cell apart are one trip, not two.
@@ -279,11 +286,11 @@ class MapGenerator:
         for layer in sorted(by_layer):
             if len(chosen) >= self.params.poi_count:
                 break
-            chosen.append(self._farthest(cells, by_layer[layer], chosen))
+            chosen.append(self._best(cells, by_layer[layer], chosen))
         spare = [id_ for ids in by_layer.values() for id_ in ids if id_ not in chosen]
         self.rng.shuffle(spare)
         while spare and len(chosen) < self.params.poi_count:
-            pick = self._farthest(cells, spare, chosen, exclude=chosen)
+            pick = self._best_spread(cells, spare, chosen)
             chosen.append(pick)
             spare.remove(pick)
 
@@ -296,10 +303,71 @@ class MapGenerator:
 
         pois: List[Poi] = []
         for index, id_ in enumerate(chosen):
-            poi = Poi(f"poi_{index}", id_, threshold)
+            poi = Poi(f"poi_{index}", id_, threshold, self._interest(cells[id_]))
             cells[id_].poi_id = poi.id
             pois.append(poi)
         return pois
+
+    def _interest(self, cell: Cell) -> float:
+        """Cost/reward score of a POI candidate, in [0, 1].
+
+        Climbing is both the cost and the reward: higher ground takes more
+        work to reach and surveys further once held. Expensive terrain adds
+        cost on top. Weights come from the poi config so an experiment can
+        move the emphasis without touching the generator.
+        """
+        p = self.map_params
+        total = p.poi_interest_climb_weight + p.poi_interest_ground_weight
+        if total <= 0:
+            return 0.0
+        climb = cell.pos[2] / max(1, p.depth - 1)
+        costs = [terrain(name).cost for name in terrain_names()]
+        span = max(costs) - min(costs)
+        ground = (terrain(cell.true_terrain).cost - min(costs)) / span if span > 0 else 0.0
+        return (p.poi_interest_climb_weight * climb + p.poi_interest_ground_weight * ground) / total
+
+    def _best(
+        self,
+        cells: Dict[str, Cell],
+        candidates: Sequence[str],
+        chosen: Sequence[str],
+    ) -> str:
+        """Highest-interest candidate; near-ties broken by spread.
+
+        Candidates within 5% of the best interest count as tied, and the
+        farthest of those wins, so a marginally more interesting cell does
+        not pull two points of interest next to each other.
+        """
+        scored = [(self._interest(cells[id_]), id_) for id_ in candidates]
+        best = max(score for score, _ in scored)
+        pool = [id_ for score, id_ in scored if score >= best * 0.95]
+        return self._farthest(cells, pool, chosen)
+
+    def _best_spread(
+        self,
+        cells: Dict[str, Cell],
+        spare: Sequence[str],
+        chosen: Sequence[str],
+    ) -> str:
+        """Fill pick: half interest, half distance from what's placed."""
+        interests = {id_: self._interest(cells[id_]) for id_ in spare}
+        placed = [parse_cell_id(id_) for id_ in chosen]
+        dists = {
+            id_: min(distance(parse_cell_id(id_), pos) for pos in placed)
+            for id_ in spare
+        }
+        imax = max(interests.values())
+        dmax = max(dists.values())
+
+        def norm(value: float, top: float) -> float:
+            return value / top if top > 0 else 0.0
+
+        scored = [
+            (0.5 * norm(interests[id_], imax) + 0.5 * norm(dists[id_], dmax), id_)
+            for id_ in spare
+        ]
+        best = max(score for score, _ in scored)
+        return self.rng.choice([id_ for score, id_ in scored if score == best])
 
     def _observable_cells(self, cells: Dict[str, Cell], threshold: float) -> Set[str]:
         """Reachable cells that something can be observed from.

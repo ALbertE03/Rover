@@ -26,6 +26,10 @@ class MapParams:
             se descubren al avanzar.
         poi_count: Number of points of interest.
         poi_min_visibility: Visibility the observer's ground needs.
+        poi_interest_climb_weight: Weight of height (costly to climb,
+            rewarding to survey from) in the POI interest score.
+        poi_interest_ground_weight: Weight of terrain cost in the POI
+            interest score.
         stations: ``(id, radius, signal)`` per station.
         battery: Declared energy budget. Carried, not spent here.
         memory: Declared sample-buffer budget. Carried, not spent here.
@@ -43,6 +47,8 @@ class MapParams:
     battery: float
     memory: float
     survey_height_bonus: float = 2.0
+    poi_interest_climb_weight: float = 0.6
+    poi_interest_ground_weight: float = 0.4
     seed: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -63,6 +69,14 @@ class MapParams:
         if not 0.0 <= self.poi_min_visibility <= 1.0:
             raise ValueError(
                 f"poi_min_visibility must be in [0, 1], got {self.poi_min_visibility}"
+            )
+        if self.poi_interest_climb_weight < 0:
+            raise ValueError(
+                f"poi_interest_climb_weight must be >= 0, got {self.poi_interest_climb_weight}"
+            )
+        if self.poi_interest_ground_weight < 0:
+            raise ValueError(
+                f"poi_interest_ground_weight must be >= 0, got {self.poi_interest_ground_weight}"
             )
         if not self.stations:
             raise ValueError("at least one station is required")

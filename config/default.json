@@ -61,7 +61,9 @@
   },
   "poi": {
     "count": 3,
-    "min_visibility": 0.7
+    "min_visibility": 0.7,
+    "interest_climb_weight": 0.6,
+    "interest_ground_weight": 0.4
   },
   "rover": {
     "battery": 75.0,

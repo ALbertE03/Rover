@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import ceil
 from typing import Dict, Optional, Sequence, Tuple
 from .catalogue import UNKNOWN, terrain
 
@@ -33,17 +34,20 @@ def distance(a: Coord, b: Coord) -> float:
 def neighbour_offsets(radius: float) -> Tuple[Coord, ...]:
     """Cell offsets within ``radius`` of the origin, excluding the origin.
 
-    Computed once and reused by every reachability query. At radius 1.0 this
-    is the six axis-aligned neighbours; at 1.8 the diagonals join in, which is
-    the single knob that changes how connected the map feels.
+    The search cube grows with the radius (``ceil(radius)`` per axis) while
+    the euclidean filter keeps the shape spherical, so a larger radius really
+    reaches further. At radius 1.0 this is the six axis-aligned neighbours; at
+    1.8 the diagonals join in, which is the single knob that changes how
+    connected the map feels. Past ``sqrt(3)`` the cube keeps growing, which is
+    what lets the survey radius grow with height.
     """
     if radius <= 0:
         raise ValueError(f"movement radius must be > 0, got {radius}")
-    cube = [-1, 0, 1]
+    bound = ceil(radius)
     offsets = []
-    for dx in cube:
-        for dy in cube:
-            for dz in cube:
+    for dx in range(-bound, bound + 1):
+        for dy in range(-bound, bound + 1):
+            for dz in range(-bound, bound + 1):
                 offset = (dx, dy, dz)
                 if offset != (0, 0, 0) and distance(offset, (0, 0, 0)) <= radius:
                     offsets.append(offset)
