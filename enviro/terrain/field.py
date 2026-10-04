@@ -38,6 +38,7 @@ class TerrainField:
         self.height_smooth_passes = 2
         self.height_subhill_rate = 0.08
         self.height_peak_keep_rate = 0.3
+        self.height_contrast = 2.0
         self._heightmap: Optional[List[List[int]]] = None
         self._configure(settings if settings is not None else get("generation"))
 
@@ -55,6 +56,7 @@ class TerrainField:
         self.height_smooth_passes = settings.get("height_smooth_passes", 2)
         self.height_subhill_rate = float(settings.get("height_subhill_rate", 0.08))
         self.height_peak_keep_rate = float(settings.get("height_peak_keep_rate", 0.3))
+        self.height_contrast = float(settings.get("height_contrast", 2.0))
         self._validate()
 
     def _validate(self) -> None:
@@ -100,6 +102,10 @@ class TerrainField:
         if not 0.0 <= self.height_peak_keep_rate <= 1.0:
             raise ValueError(
                 f"generation.height_peak_keep_rate must be in [0, 1], got {self.height_peak_keep_rate!r}"
+            )
+        if not self.height_contrast > 0.0:
+            raise ValueError(
+                f"generation.height_contrast must be > 0, got {self.height_contrast!r}"
             )
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
@@ -168,6 +174,11 @@ class TerrainField:
         for x in range(self.width):
             for y in range(self.height):
                 n = self._height_noise(x + self.origin[0], y + self.origin[1])
+                # Contraste: estira el ruido alrededor de 0.5 para que el mapa
+                # use todo el rango [0, depth-1] en vez de amontonarse en el medio.
+                # 1.0 = sin cambios; más alto = más llanuras bajas y más cimas altas.
+                n = 0.5 + (n - 0.5) * self.height_contrast
+                n = max(0.0, min(1.0, n))
                 h = int(n * (self.depth - 1) + 0.5)
                 raw[x][y] = max(0, min(self.depth - 1, h))
         for _ in range(self.height_smooth_passes):

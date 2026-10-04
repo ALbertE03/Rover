@@ -29,7 +29,8 @@
     "height_smooth_passes": 2,
     "height_subhill_rate": 0.08,
     "noise_octaves": 3,
-    "noise_scale": 2
+    "noise_scale": 2,
+    "height_contrast": 2.0
   },
   "map": {
     "block_rate": 0.06,
