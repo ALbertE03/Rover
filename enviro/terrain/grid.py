@@ -54,6 +54,25 @@ def neighbour_offsets(radius: float) -> Tuple[Coord, ...]:
     return tuple(sorted(offsets))
 
 
+def movement_offsets(radius: float, allow_diagonal: bool = True) -> Tuple[Coord, ...]:
+    """Offsets the rover may step to.
+
+    With ``allow_diagonal`` this is :func:`neighbour_offsets` unchanged. Without
+    it, only the 4 horizontal neighbours (N/S/E/W), each with ``dz`` in
+    ``{-1, 0, 1}`` so the rover can still climb: purely axis-aligned 3D steps
+    could never change height, trapping the rover on its starting hill.
+    """
+    if allow_diagonal:
+        return neighbour_offsets(radius)
+    offsets = []
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        for dz in (-1, 0, 1):
+            offset = (dx, dy, dz)
+            if distance(offset, (0, 0, 0)) <= radius:
+                offsets.append(offset)
+    return tuple(sorted(offsets))
+
+
 @dataclass
 class Cell:
     """One position on the map.

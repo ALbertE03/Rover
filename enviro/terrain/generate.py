@@ -6,7 +6,7 @@ from ..config import load_config,get
 from .catalogue import terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
-from .grid import Cell, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
+from .grid import Cell, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
 from .instance import Map, MapParams
 
 
@@ -190,6 +190,7 @@ class MapGenerator:
             block_rate=self.params.block_rate,
             move_radius=float(movement["radius"]),
             climb_penalty=float(movement["climb_penalty"]),
+            move_allow_diagonal=bool(movement.get("allow_diagonal", True)),
             poi_count=self.params.poi_count,
             poi_min_visibility=float(poi["min_visibility"]),
             poi_interest_climb_weight=float(poi.get("interest_climb_weight", 0.6)),
@@ -383,9 +384,14 @@ class MapGenerator:
         computed with the same rule a consumer would use, not a second
         approximation of it.
         """
-        offsets = neighbour_offsets(self.map_params.move_radius)
+        move_offsets = movement_offsets(
+            self.map_params.move_radius, self.map_params.move_allow_diagonal
+        )
+        # Observation is about distance and clear ground, not about how the
+        # rover walks: the vantage scan stays euclidean.
+        view_offsets = neighbour_offsets(self.map_params.move_radius)
         starts = [c.id for c in self._surface_cells(cells)]
-        reachable = reachable_cells(cells, starts, offsets)
+        reachable = reachable_cells(cells, starts, move_offsets)
 
         observable: Set[str] = set()
         for id_ in reachable:
@@ -393,7 +399,7 @@ class MapGenerator:
             if cell.poi_id:
                 continue
             x, y, z = cell.pos
-            for dx, dy, dz in offsets:
+            for dx, dy, dz in view_offsets:
                 vantage = cells.get(cell_id(x + dx, y + dy, z + dz))
                 if vantage is None or not vantage.traversable:
                     continue

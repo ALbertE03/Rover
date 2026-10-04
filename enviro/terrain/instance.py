@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 from .catalogue import UNKNOWN, terrain, terrain_names
 from .features import Poi, Station
-from .grid import Cell, Coord, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
+from .grid import Cell, Coord, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,9 @@ class MapParams:
             rewarding to survey from) in the POI interest score.
         poi_interest_ground_weight: Weight of terrain cost in the POI
             interest score.
+        move_allow_diagonal: When false, steps are limited to the 4 horizontal
+            neighbours (each may still gain/lose one level, so hills stay
+            climbable); plan-view diagonals are excluded.
         stations: ``(id, radius, signal)`` per station.
         battery: Declared energy budget. Carried, not spent here.
         memory: Declared sample-buffer budget. Carried, not spent here.
@@ -49,6 +52,7 @@ class MapParams:
     survey_height_bonus: float = 2.0
     poi_interest_climb_weight: float = 0.6
     poi_interest_ground_weight: float = 0.4
+    move_allow_diagonal: bool = True
     seed: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -130,7 +134,7 @@ class Map:
         self.cells = cells
         self.stations = tuple(stations)
         self.pois = {poi.id: poi for poi in pois}
-        self._offsets = neighbour_offsets(params.move_radius)
+        self._offsets = movement_offsets(params.move_radius, params.move_allow_diagonal)
 
     #  geometry 
 
@@ -337,10 +341,20 @@ class Map:
         return terrain(here.true_terrain).visibility >= threshold
 
     def vantage_points(self, poi: Poi) -> List[str]:
-        """Cells this point of interest can be observed from."""
+        """Cells this point of interest can be observed from.
+
+        Every cell within one step's reach, not just step neighbours:
+        observation is about distance and clear ground, not about how the
+        rover walks.
+        """
+        x, y, z = parse_cell_id(poi.cell_id)
+        ids = [poi.cell_id]
+        for dx, dy, dz in neighbour_offsets(self.params.move_radius):
+            cell = self.cells.get(cell_id(x + dx, y + dy, z + dz))
+            if cell is not None:
+                ids.append(cell.id)
         return [
-            id_
-            for id_ in [poi.cell_id, *self.neighbours(poi.cell_id)]
+            id_ for id_ in ids
             if self.cell(id_).traversable and self.observability(poi, id_)
         ]
 
