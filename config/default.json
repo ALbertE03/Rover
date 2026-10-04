@@ -26,7 +26,7 @@
     "height_octaves": 1,
     "height_peak_keep_rate": 0.3,
     "height_scale": 2,
-    "height_smooth_passes": 2,
+    "height_smooth_passes": 0,
     "height_subhill_rate": 0.08,
     "noise_octaves": 3,
     "noise_scale": 2,
