@@ -201,25 +201,43 @@ class MapGenerator:
     # construction 
 
     def _place_terrain(self) -> Dict[str, Cell]:
-        """One cell per grid position, terrain from the field."""
+        """Terreno disperso en z: solo hay bloques donde hay loma.
+
+        Para cada (x, y), h = height_at(x, y) en [0, depth-1]:
+        - z > h: aire, no se crea celda.
+        - z == h: superficie transitable (cima plana de la meseta).
+        - z < h: interior sólido de la loma, bloqueado. No se puede estar
+          en (1,1,1) si la loma llega a (1,1,2): hay que subir por fuera.
+
+        Así el eje z solo crea bloques donde hay lomas y las lomas son
+        mesetas de varias celdas planas arriba (ver TerrainField).
+        """
         cells: Dict[str, Cell] = {}
-        for z in range(self.params.depth):
-            for x in range(self.params.width):
-                for y in range(self.params.height):
+        for x in range(self.params.width):
+            for y in range(self.params.height):
+                h = self.field.height_at(x, y)
+                for z in range(self.params.depth):
+                    if z > h:
+                        continue  # aire
                     id_ = cell_id(x, y, z)
-                    cells[id_] = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
+                    cell = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
+                    if z < h:
+                        cell.blocked = True  # interior sólido
+                    cells[id_] = cell
         return cells
 
     def _place_boulders(self, cells: Dict[str, Cell]) -> None:
-        """Block cells independently with probability ``block_rate``.
+        """Block surface cells independently with probability ``block_rate``.
 
-        Independent per cell on purpose. Boulder fields clump in reality, but a
-        clumped rule needs another knob and another thing to calibrate, and
-        the connectivity guarantee in step 4 already keeps the map solvable
-        whatever the draw does.
+        Solo la superficie puede tener boulders. El interior ya está
+        bloqueado por ser sólido y el aire no existe como celda.
         """
         for cell in cells.values():
-            cell.blocked = self.rng.random() < self.params.block_rate
+            x, y, z = cell.pos
+            if not self.field.is_surface(x, y, z):
+                continue
+            if not cell.blocked:
+                cell.blocked = self.rng.random() < self.params.block_rate
 
     def _place_stations(self, cells: Dict[str, Cell]) -> Tuple[Station, ...]:
         """Place stations on the surface, as far apart as the map allows."""
@@ -290,12 +308,7 @@ class MapGenerator:
         approximation of it.
         """
         offsets = neighbour_offsets(self.map_params.move_radius)
-        starts = [
-            cell_id(x, y, 0)
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if cells[cell_id(x, y, 0)].traversable
-        ]
+        starts = [c.id for c in self._surface_cells(cells)]
         reachable = reachable_cells(cells, starts, offsets)
 
         observable: Set[str] = set()
@@ -339,13 +352,19 @@ class MapGenerator:
         return self.rng.choice([id_ for score, id_ in scored if score == best])
 
     def _surface_cells(self, cells: Dict[str, Cell]) -> List[Cell]:
-        """Traversable cells on the top layer, in a stable order."""
-        return [
-            cells[cell_id(x, y, 0)]
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if not cells[cell_id(x, y, 0)].blocked
-        ]
+        """Celdas transitables en la superficie real (cima de cada columna).
+
+        Ya no es z=0: es z == height_at(x, y). En orden estable para que
+        la generación sea reproducible.
+        """
+        out: List[Cell] = []
+        for x in range(self.params.width):
+            for y in range(self.params.height):
+                h = self.field.height_at(x, y)
+                c = cells.get(cell_id(x, y, h))
+                if c is not None and c.traversable:
+                    out.append(c)
+        return out
 
     def __repr__(self) -> str:
         return f"MapGenerator(seed={self.params.seed})"

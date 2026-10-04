@@ -148,22 +148,30 @@ class Map:
         return reachable_cells(self.cells, list(ids), self._offsets)
 
     def reachable_from_surface(self) -> set:
-        """Cells reachable from any traversable cell on the top layer.
+        """Cells reachable from any traversable surface cell.
 
-        The reference for "can you get there at all". Objectives are placed
-        inside this set, which is what makes every generated instance coherent:
-        nothing interesting is walled off.
+        La superficie ahora es la cima real de cada columna (z == altura),
+        no z=0. Es la referencia de "se puede llegar": los objetivos se
+        colocan dentro de este conjunto.
         """
         return self.reachable_from(*self.surface_ids())
 
     def surface_ids(self) -> List[str]:
-        """Traversable cells on the top layer."""
-        return [
-            cell_id(x, y, 0)
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if self.cells[cell_id(x, y, 0)].traversable
-        ]
+        """Ids de celdas transitables en la cima real de cada columna.
+
+        Una celda es superficie si es transitable y no hay ninguna celda
+        (transitable o sólida) por encima en la misma (x, y). El aire no
+        existe como celda, así que basta con mirar z+1.
+        """
+        ids: List[str] = []
+        for cell in self.cells.values():
+            if not cell.traversable:
+                continue
+            x, y, z = cell.pos
+            above = self.cells.get(cell_id(x, y, z + 1))
+            if above is None:
+                ids.append(cell.id)
+        return sorted(ids)
 
     #  cost model 
 
