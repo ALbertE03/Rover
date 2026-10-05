@@ -263,6 +263,25 @@ def _png_b64(img) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _bar_png(value: float, max_value: float, width: int = 120,
+             height: int = 14, color: tuple = (76, 110, 245)) -> str:
+    """Pixel bar: filled pixels proportional to value/max_value."""
+    from PIL import Image
+    img = Image.new("RGB", (width, height), (26, 34, 48))
+    px = img.load()
+    frac = max(0.0, min(1.0, value / max_value)) if max_value > 0 else 0.0
+    filled = int(round(frac * width))
+    for x in range(filled):
+        for y in range(height):
+            px[x, y] = color
+    # pixel grid lines every 6px for the "pixel" look
+    for x in range(0, width, 6):
+        for y in range(height):
+            if x < filled:
+                px[x, y] = tuple(max(0, c - 40) for c in color)
+    return _png_b64(img)
+
+
 def _gray(v: float) -> tuple:
     g = max(0, min(255, int(round(20 + v * 220))))
     return (g, g, g)
@@ -417,6 +436,8 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 .legend-box{line-height:2.2}
 .leg-item{display:inline-block;margin-right:14px;white-space:nowrap}
 .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:5px;vertical-align:-2px;border:1px solid rgba(255,255,255,.25)}
+.stat-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0}
+.pxbar{height:14px;border-radius:3px;image-rendering:pixelated;flex-shrink:0}
 @media(max-width:600px){
   body{padding:10px}
   .tabs label{padding:8px 14px;font-size:13px}
@@ -454,6 +475,23 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
     parts.append(f"<div class='note legend-box'><b>Leyenda:</b> {leg_items}</div>")
 
     parts.append("<div class='cmp-grid'>")
+    # maxes across seeds for pixel-bar normalization
+    import math as _m
+    _max = {
+        "boulder_pct": max(e["stats"]["boulder_pct"] for e in entries),
+        "pois": max(len(e["pois"]) for e in entries),
+        "interest": 1.0,
+        "science": max(e["stats"]["total_science"] for e in entries),
+        "cost": max(sum(t["cost"] * e["terrain_mix"].get(t["name"], 0)
+                        for t in e["terrain_catalogue"]) / (e["W"] * e["H"])
+                    for e in entries),
+        "h_mean": entries[0]["depth"] - 1,
+        "roughness": max(e["stats"]["roughness"] for e in entries),
+        "entropy": _m.log2(max(2, len(entries[0]["terrain_catalogue"]))),
+    }
+    _BCOL = {"boulder": (255, 135, 135), "poi": (199, 146, 234),
+             "cost": (255, 169, 77), "height": (59, 91, 219),
+             "rough": (230, 119, 0), "div": (47, 158, 68)}
     for e in entries:
         seed = e["seed"]
         t64 = _png_b64(_map_png(e, "terrain", scale=10))
@@ -464,21 +502,36 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
         avg_interest = (sum(p["interest"] for p in e["pois"]) / len(e["pois"])
                         if e["pois"] else 0)
         hdist = ", ".join(f"z{z}:{c}" for z, c in enumerate(e["layer_hist"]))
+
+        def _row(emoji, label, val_txt, frac_val, frac_max, col):
+            bar = _bar_png(frac_val, frac_max, color=_BCOL[col])
+            return (f"<div class='stat-row'><span>{emoji} {label}: "
+                    f"<b>{val_txt}</b></span>"
+                    f"<img class='pxbar' src='{bar}'></div>")
+
         parts.append(
             f"<div class='panel cmp-card'><h3>Seed {seed}</h3>"
             f"<img class='viz' src='{t64}'>"
             f"<div class='stats'>"
-            f"<div>\U0001f9f1 <b>{len(e['boulders'])}</b> rocas ({st['boulder_pct']:.1f}%)</div>"
-            f"<div>\U0001f4cd <b>{len(e['pois'])}</b> POIs \u2014 "
-            f"inter\u00e9s medio {avg_interest:.2f}, total {st['total_science']:.2f}</div>"
-            f"<div>\U0001f4b0 Costo medio de paso: <b>{avg_cost:.2f}</b></div>"
-            f"<div>\U0001f3d4\ufe0f Altura media {st['h_mean']:.2f} "
-            f"(\u00b1{st['h_std']:.2f}), rango z{st['h_min']}\u2013z{st['h_max']}</div>"
-            f"<div>\u3030\ufe0f Rugosidad (desnivel medio): <b>{st['roughness']:.2f}</b></div>"
-            f"<div>\U0001f500 Diversidad de terrenos: {st['entropy']:.2f} bits \u2014 "
-            f"domina {st['most_terrain']} ({st['most_pct']:.0f}%), "
+            + _row("\U0001f9f1", "Rocas", f"{len(e['boulders'])} ({st['boulder_pct']:.1f}%)",
+                   st["boulder_pct"], 100.0, "boulder")
+            + _row("\U0001f4cd", "POIs", f"{len(e['pois'])}",
+                   len(e["pois"]), _max["pois"], "poi")
+            + _row("\U0001f4a1", "Inter\u00e9s medio", f"{avg_interest:.2f}",
+                   avg_interest, _max["interest"], "poi")
+            + _row("\U0001f52c", "Ciencia total", f"{st['total_science']:.2f}",
+                   st["total_science"], _max["science"], "poi")
+            + _row("\U0001f4b0", "Costo medio", f"{avg_cost:.2f}",
+                   avg_cost, _max["cost"], "cost")
+            + _row("\U0001f3d4\ufe0f", "Altura media", f"{st['h_mean']:.2f}",
+                   st["h_mean"], _max["h_mean"], "height")
+            + _row("\u3030\ufe0f", "Rugosidad", f"{st['roughness']:.2f}",
+                   st["roughness"], _max["roughness"], "rough")
+            + _row("\U0001f500", "Diversidad", f"{st['entropy']:.2f} bits",
+                   st["entropy"], _max["entropy"], "div")
+            + f"<div class='dim'>Domina {st['most_terrain']} ({st['most_pct']:.0f}%) \u00b7 "
             f"raro {st['least_terrain']} ({st['least_pct']:.0f}%)</div>"
-            f"<div class='dim'>Distribuci\u00f3n \u2014 {hdist}</div>"
+            f"<div class='dim'>{hdist}</div>"
             f"</div></div>")
     parts.append("</div>")
     parts.append('</div>')
