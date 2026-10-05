@@ -198,7 +198,10 @@ def _quant_report(e: Dict) -> str:
 
 
 def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
-    """Self-contained HTML showing the pipeline behind every map."""
+    """Self-contained HTML showing the pipeline behind every map.
+
+    Tabs: a comparison overview first, then one tab per seed.
+    """
     heading = escape(title)
     parts = []
     parts.append("""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
@@ -230,29 +233,84 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 .mB{color:#7ef0a0}.mR{color:#ffa94d}.mO{color:#c792ea}.mA{color:#ff8787}
 .dim{color:#79839a;font-size:11px}
 .feat{margin-top:8px;line-height:2}
+.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
+.tab{background:#2b3a55;border:0;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer}
+.tab:hover{background:#3a4d73}
+.tab.on{background:#4c6ef5}
+.tabsec{display:none}
+.tabsec.on{display:block}
+.cmp-grid{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
 </style></head><body>
 <h1>""" + heading + f"""</h1>
 <div class="note">Cada mapa nace de <b>3 ruidos aleatorios</b> (estrella + manchas + ondas)
 &rarr; promedio &rarr; contraste &rarr; <b>cuantizaci&oacute;n</b>.
 Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por columna) bloquean el paso.</div>
 
-<h2>C&oacute;mo funciona la cuantizaci&oacute;n</h2>
-<div class="note">
-<ol class="steps">
-<li><b>Promediar</b> los tres ruidos normalizados &rarr;
-<code>n = (estrella + manchas + ondas) / 3</code></li>
-<li><b>Estirar</b> alrededor del punto medio &rarr;
-<code>n = 0.5 + (n - 0.5) &times; height_contrast</code></li>
-<li><b>Recortar</b> al rango v&aacute;lido &rarr;
-<code>n = clamp(n, 0, 1)</code></li>
-<li><b>Redondear</b> a la capa m&aacute;s cercana, los empates hacia arriba &rarr;
-<code>h = int(n &times; (depth - 1) + 0.5)</code></li>
-</ol>
-</div>
+<div class="tabs" id="tabs"></div>
 """)
 
+    # ---- Comparison tab (default) ----
+    parts.append('<div class="tabsec on" id="tab-cmp">')
+    parts.append("<h2>Comparaci\u00f3n de terrenos</h2>")
+    parts.append("<div class='cmp-grid'>")
     for e in entries:
-        seed, W, H, depth = e["seed"], e["W"], e["H"], e["depth"]
+        seed = e["seed"]
+        W, H = e["W"], e["H"]
+        S = max(2, 320 // W)
+        SZ = W * S
+        parts.append(
+            f"<div class='panel'><h3>Seed {seed} \u2014 altura final</h3>"
+            f"<canvas id='cmpH{seed}' width='{SZ}' height='{SZ}'></canvas>"
+            f"<canvas id='cmpT{seed}' width='{SZ}' height='{SZ}' "
+            f"style='margin-top:8px'></canvas>"
+            f"<div class='legend'>arriba: altura z \u00b7 abajo: terrenos</div></div>")
+    parts.append("</div>")
+
+    # Comparison table: height histograms + terrain mix side by side
+    parts.append("<h2>N\u00fameros lado a lado</h2>")
+    parts.append('<table class="kv"><tr><th></th>' +
+                 "".join(f"<th>Seed {e['seed']}</th>" for e in entries) + "</tr>")
+    # Height histogram rows
+    depth = entries[0]["depth"]
+    max_hist = max(max(e["layer_hist"]) for e in entries)
+    for z in range(depth):
+        parts.append(f"<tr><td>Altura z={z}</td>")
+        for e in entries:
+            c = e["layer_hist"][z] if z < len(e["layer_hist"]) else 0
+            pct = 100 * c / (e["W"] * e["H"])
+            w = 100 * c / max_hist if max_hist else 0
+            col = e["height_colors"][z]
+            parts.append(
+                f"<td class='num'>{c} ({pct:.0f}%)</td>"
+                f"<td class='bar'><span style='width:{w:.0f}%;background:{col}'></span></td>")
+        parts.append("</tr>")
+    # Terrain mix rows
+    terrains = sorted({t for e in entries for t in e["terrain_mix"]})
+    max_mix = max(max(e["terrain_mix"].values()) for e in entries)
+    tcol = {"plain": "#4a7c59", "sand": "#c9a227", "rock": "#6b7280", "crevasse": "#1f2937"}
+    tnames = {"plain": "llano", "sand": "arena", "rock": "roca", "crevasse": "grieta"}
+    for t in terrains:
+        parts.append(f"<tr><td>{tnames.get(t, t)}</td>")
+        for e in entries:
+            c = e["terrain_mix"].get(t, 0)
+            w = 100 * c / max_mix if max_mix else 0
+            parts.append(
+                f"<td class='num'>{c}</td>"
+                f"<td class='bar'><span style='width:{w:.0f}%;background:{tcol.get(t,'#888')}'></span></td>")
+        parts.append("</tr>")
+    # Counts
+    for label, key in [("Rocas \u25b2", "boulders"), ("POIs", "pois"), ("Bases", "stations")]:
+        parts.append(f"<tr><td>{label}</td>")
+        for e in entries:
+            parts.append(f"<td class='num' colspan='2'>{len(e[key])}</td>")
+        parts.append("</tr>")
+    parts.append("</table>")
+    parts.append('</div>')  # end comparison tab
+
+    for e in entries:
+        seed = e["seed"]
+        parts.append(f'<div class="tabsec" id="tab-{seed}">')
+        W, H, depth = e["W"], e["H"], e["depth"]
         S = max(2, 480 // W)
         SZ = W * S
         mix = ", ".join(f"{k}: {v}" for k, v in sorted(e["terrain_mix"].items()))
@@ -305,13 +363,41 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
             f"{' \u00b7 '.join(bases)}{' \u00b7 '.join(relays)}<br>{poi_list}</span>"
             "</div>")
         parts.append(_quant_report(e))
-        
+        parts.append('</div>')  # end seed tab
+
 
     parts.append("<script>")
     parts.append("const D=" + json.dumps({"entries": entries}) + ";")
     parts.append("""
 const TC={"plain":"#4a7c59","sand":"#c9a227","rock":"#6b7280","crevasse":"#1f2937"};
 function gray(v){const g=Math.round(20+v*220);return "rgb("+g+","+g+","+g+")";}
+// Tabs: comparison first, then one per seed.
+(function(){
+  const tabs=document.getElementById("tabs");
+  const mk=(id,label,on)=>{
+    const b=document.createElement("button");
+    b.className="tab"+(on?" on":"");b.textContent=label;
+    b.onclick=()=>{
+      document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
+      b.classList.add("on");
+      document.querySelectorAll(".tabsec").forEach(s=>s.classList.remove("on"));
+      document.getElementById(id).classList.add("on");
+      window.scrollTo({top:0});
+    };
+    tabs.appendChild(b);
+  };
+  mk("tab-cmp","Comparaci\\u00f3n",true);
+  D.entries.forEach(e=>mk("tab-"+e.seed,"Seed "+e.seed,false));
+})();
+// Comparison mini-maps.
+D.entries.forEach((e)=>{
+  const W=e.W,H=e.H,S=Math.max(2,Math.floor(320/W));
+  const ph=(id,fn)=>{const c=document.getElementById(id);if(!c)return;
+    const x=c.getContext("2d");
+    for(let i=0;i<W;i++)for(let j=0;j<H;j++){x.fillStyle=fn(i,j);x.fillRect(i*S,j*S,S,S);}};
+  ph("cmpH"+e.seed,(i,j)=>e.height_colors[e.heightmap[i][j]]);
+  ph("cmpT"+e.seed,(i,j)=>TC[e.terrain[i+","+j]]||"#333");
+});
 D.entries.forEach((e)=>{
   const seed=e.seed,W=e.W,H=e.H,S=Math.max(2,Math.floor(480/W));
   const paint=(id,fn)=>{const c=document.getElementById(id),x=c.getContext("2d");
