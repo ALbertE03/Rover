@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 from .catalogue import UNKNOWN, terrain, terrain_names
 from .features import Poi, Station
-from .grid import Cell, Coord, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
+from .grid import Cell, Coord, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
 
 
 @dataclass(frozen=True)
@@ -20,8 +20,19 @@ class MapParams:
         block_rate: Probability of a boulder per cell, in [0, 1].
         move_radius: Reach of one step, in grid units.
         climb_penalty: Extra cost per level gained, on top of terrain cost.
+        survey_height_bonus: Extra survey radius at max height. At z=0 the
+            survey radius is move_radius; at z=depth-1 it is
+            move_radius + survey_height_bonus. A mayor altura, más celdas
+            se descubren al avanzar.
         poi_count: Number of points of interest.
         poi_min_visibility: Visibility the observer's ground needs.
+        poi_interest_climb_weight: Weight of height (costly to climb,
+            rewarding to survey from) in the POI interest score.
+        poi_interest_ground_weight: Weight of terrain cost in the POI
+            interest score.
+        move_allow_diagonal: When false, steps are limited to the 4 horizontal
+            neighbours (each may still gain/lose one level, so hills stay
+            climbable); plan-view diagonals are excluded.
         stations: ``(id, radius, signal)`` per station.
         battery: Declared energy budget. Carried, not spent here.
         memory: Declared sample-buffer budget. Carried, not spent here.
@@ -38,6 +49,10 @@ class MapParams:
     stations: Tuple[Tuple[str, float, float], ...]
     battery: float
     memory: float
+    survey_height_bonus: float = 2.0
+    poi_interest_climb_weight: float = 0.6
+    poi_interest_ground_weight: float = 0.4
+    move_allow_diagonal: bool = True
     seed: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -51,17 +66,28 @@ class MapParams:
             raise ValueError(f"move_radius must be > 0, got {self.move_radius}")
         if self.climb_penalty < 0:
             raise ValueError(f"climb_penalty must be >= 0, got {self.climb_penalty}")
+        if self.survey_height_bonus < 0:
+            raise ValueError(f"survey_height_bonus must be >= 0, got {self.survey_height_bonus}")
         if self.poi_count < 0:
             raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
         if not 0.0 <= self.poi_min_visibility <= 1.0:
             raise ValueError(
                 f"poi_min_visibility must be in [0, 1], got {self.poi_min_visibility}"
             )
+        if self.poi_interest_climb_weight < 0:
+            raise ValueError(
+                f"poi_interest_climb_weight must be >= 0, got {self.poi_interest_climb_weight}"
+            )
+        if self.poi_interest_ground_weight < 0:
+            raise ValueError(
+                f"poi_interest_ground_weight must be >= 0, got {self.poi_interest_ground_weight}"
+            )
         if not self.stations:
             raise ValueError("at least one station is required")
         for name, radius, signal in self.stations:
-            if radius <= 0:
-                raise ValueError(f"station '{name}': radius must be > 0, got {radius}")
+            if radius < 0:
+                raise ValueError(f"station '{name}': radius must be >= 0, got {radius}")
+            # radius 0 = point station: the rover must stand on its cell.
             if not 0.0 < signal <= 1.0:
                 raise ValueError(f"station '{name}': signal must be in (0, 1], got {signal}")
         if self.battery <= 0:
@@ -109,7 +135,7 @@ class Map:
         self.cells = cells
         self.stations = tuple(stations)
         self.pois = {poi.id: poi for poi in pois}
-        self._offsets = neighbour_offsets(params.move_radius)
+        self._offsets = movement_offsets(params.move_radius, params.move_allow_diagonal)
 
     #  geometry 
 
@@ -148,22 +174,30 @@ class Map:
         return reachable_cells(self.cells, list(ids), self._offsets)
 
     def reachable_from_surface(self) -> set:
-        """Cells reachable from any traversable cell on the top layer.
+        """Cells reachable from any traversable surface cell.
 
-        The reference for "can you get there at all". Objectives are placed
-        inside this set, which is what makes every generated instance coherent:
-        nothing interesting is walled off.
+        La superficie ahora es la cima real de cada columna (z == altura),
+        no z=0. Es la referencia de "se puede llegar": los objetivos se
+        colocan dentro de este conjunto.
         """
         return self.reachable_from(*self.surface_ids())
 
     def surface_ids(self) -> List[str]:
-        """Traversable cells on the top layer."""
-        return [
-            cell_id(x, y, 0)
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if self.cells[cell_id(x, y, 0)].traversable
-        ]
+        """Ids de celdas transitables en la cima real de cada columna.
+
+        Una celda es superficie si es transitable y no hay ninguna celda
+        (transitable o sólida) por encima en la misma (x, y). El aire no
+        existe como celda, así que basta con mirar z+1.
+        """
+        ids: List[str] = []
+        for cell in self.cells.values():
+            if not cell.traversable:
+                continue
+            x, y, z = cell.pos
+            above = self.cells.get(cell_id(x, y, z + 1))
+            if above is None:
+                ids.append(cell.id)
+        return sorted(ids)
 
     #  cost model 
 
@@ -204,12 +238,48 @@ class Map:
 
     #  knowledge 
 
+    def survey_radius_at(self, cell: Cell) -> float:
+        """Radio de descubrimiento desde una celda.
+
+        Dos factores, ambos sobre el observador:
+
+        * **Altura:** en z=0 es move_radius; en la cima (z=depth-1) es
+          move_radius + survey_height_bonus. A mayor altura, más se ve.
+        * **Visibilidad del propio terreno:** el radio se multiplica por la
+          visibilidad del suelo que se pisa (la misma que decide si un POI es
+          legible). En llano despejado se aprovecha todo; en una grieta
+          (crevasse) se ve poco aunque se esté alto: el mejor mirador no sirve
+          si el suelo no deja ver a través.
+
+        Se usa el terreno real: el observador sabe qué pisa.
+        """
+        if self.params.depth <= 1:
+            base = self.params.move_radius
+        else:
+            frac = cell.pos[2] / max(1, self.params.depth - 1)
+            base = self.params.move_radius + self.params.survey_height_bonus * frac
+        return base * terrain(cell.true_terrain).visibility
+
+    def _around_survey(self, cell: Cell) -> List[Cell]:
+        """Celdas dentro del radio de descubrimiento (depende de la altura)."""
+        radius = self.survey_radius_at(cell)
+        offsets = neighbour_offsets(radius)
+        x, y, z = cell.pos
+        return [
+            other
+            for other in (
+                self.cells.get(cell_id(x + dx, y + dy, z + dz))
+                for dx, dy, dz in offsets
+            )
+            if other is not None
+        ]
+
     def survey(self, id_: str) -> List[str]:
         """Reveal the terrain around a cell and report what was revealed.
 
-        A rover standing somewhere sees its immediate surroundings, and that is
-        the only way knowledge grows in this model. Boulders are excluded:
-        they are visible from anywhere, so there is nothing to learn about them.
+        El radio crece con la altura y con la visibilidad del propio terreno:
+        a mayor altura, más celdas se descubren al avanzar; en terreno despejado
+        se aprovecha todo el radio, en grietas se ve poco aunque se esté alto.
 
         Args:
             id_: Cell to observe from. Unknown ids reveal nothing.
@@ -221,7 +291,7 @@ class Map:
         if cell is None:
             return []
         revealed = []
-        for other in [cell, *self._around(cell)]:
+        for other in [cell, *self._around_survey(cell)]:
             if not other.surveyed:
                 other.survey()
                 revealed.append(other.id)
@@ -272,10 +342,20 @@ class Map:
         return terrain(here.true_terrain).visibility >= threshold
 
     def vantage_points(self, poi: Poi) -> List[str]:
-        """Cells this point of interest can be observed from."""
+        """Cells this point of interest can be observed from.
+
+        Every cell within one step's reach, not just step neighbours:
+        observation is about distance and clear ground, not about how the
+        rover walks.
+        """
+        x, y, z = parse_cell_id(poi.cell_id)
+        ids = [poi.cell_id]
+        for dx, dy, dz in neighbour_offsets(self.params.move_radius):
+            cell = self.cells.get(cell_id(x + dx, y + dy, z + dz))
+            if cell is not None:
+                ids.append(cell.id)
         return [
-            id_
-            for id_ in [poi.cell_id, *self.neighbours(poi.cell_id)]
+            id_ for id_ in ids
             if self.cell(id_).traversable and self.observability(poi, id_)
         ]
 

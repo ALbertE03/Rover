@@ -1,3 +1,5 @@
+import math
+import random
 from typing import Dict, List, Optional, Tuple
 from ..config import get
 from .catalogue import terrain_names
@@ -32,15 +34,11 @@ class TerrainField:
         self.octaves = 1
         self.weights = {"x": 0.5, "y": 0.5}
         self.bands: List[Tuple[float, str]] = []
+        self.height_contrast = 2.0
+        self._heightmap: Optional[List[List[int]]] = None
         self._configure(settings if settings is not None else get("generation"))
 
     def _configure(self, settings: Dict) -> None:
-        """Read and validate the field settings from a config section.
-
-        Bands are sorted on the way in, so the order they appear in the file
-        does not matter; what does matter is that their edges are distinct and
-        that every one names a real terrain.
-        """
         self.scale = settings.get("noise_scale", 2)
         self.octaves = settings.get("noise_octaves", 3)
         self.weights = dict(settings.get("axis_weights", {"x": 0.5, "y": 0.5}))
@@ -49,28 +47,16 @@ class TerrainField:
             [(float(b["max"]), str(b["terrain"])) for b in settings.get("bands", [])],
             key=lambda pair: pair[0],
         )
+        self.height_contrast = float(settings.get("height_contrast", 2.0))
         self._validate()
 
     def _validate(self) -> None:
-        """Reject a setup that would silently skew every map it generates.
-
-        The band thresholds are absolute numbers read against a field that is
-        only centred on 0.5 when the wave completes whole periods per axis. A
-        fractional frequency or weights that do not add up shifts the whole
-        distribution and the map quietly turns into one terrain, which is the
-        kind of bug that only shows up in a results table.
-        """
         if not self.bands:
             raise ValueError("generation.bands must declare at least one band")
         if (not isinstance(self.scale, int) or isinstance(self.scale, bool)
                 or self.scale < 1 or self.scale % 2):
             raise ValueError(
-                f"generation.noise_scale must be a positive even integer, got "
-                f"{self.scale!r}. The wave's period is two units of its "
-                f"argument, so an odd scale leaves each axis covering half a "
-                f"period. The field's mean then follows the phase offset, which "
-                f"is exactly what the seed varies, and the terrain mix stops "
-                f"being the one the bands were calibrated for."
+                f"generation.noise_scale must be a positive even integer, got {self.scale!r}."
             )
         if not isinstance(self.octaves, int) or isinstance(self.octaves, bool) or not 1 <= self.octaves <= 6:
             raise ValueError(
@@ -78,63 +64,30 @@ class TerrainField:
             )
         if sorted(self.weights) != ["x", "y"]:
             raise ValueError(
-                f"generation.axis_weights must have exactly the keys x and y, got "
-                f"{sorted(self.weights)}. Depth is handled by depth_slope, not by "
-                f"a third noise axis."
+                f"generation.axis_weights must have exactly the keys x and y, got {sorted(self.weights)}."
             )
         total = float(self.weights["x"]) + float(self.weights["y"])
         if abs(total - 1.0) > 1e-9:
-            raise ValueError(
-                f"generation.axis_weights must sum to 1 so the field stays in "
-                f"[0, 1]; got {total}"
-            )
+            raise ValueError(f"generation.axis_weights must sum to 1; got {total}")
         if not 0.0 <= self.depth_slope <= 1.0:
+            raise ValueError(f"generation.depth_slope must be in [0, 1], got {self.depth_slope}")
+        if not self.height_contrast > 0.0:
             raise ValueError(
-                f"generation.depth_slope must be in [0, 1], got {self.depth_slope}"
+                f"generation.height_contrast must be > 0, got {self.height_contrast!r}"
             )
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
-            raise ValueError(
-                f"generation.bands must have distinct 'max' values, got {edges}. "
-                f"Two bands sharing an edge leave it ambiguous which terrain "
-                f"that range is meant to be."
-            )
+            raise ValueError(f"generation.bands must have distinct 'max' values, got {edges}.")
         known = set(terrain_names())
         for _, name in self.bands:
             if name not in known:
-                raise ValueError(
-                    f"generation.bands references unknown terrain {name!r}. "
-                    f"Declared in the catalogue: {sorted(known)}"
-                )
-
-    # the field
+                raise ValueError(f"generation.bands references unknown terrain {name!r}.")
 
     def value(self, x: float, y: float, z: int) -> float:
-        """Field value at a position, including the depth ramp, in [0, 1].
-
-        Args:
-            x: Position on x, already offset by :attr:`origin`.
-            y: Position on y, already offset by :attr:`origin`.
-            z: Layer index.
-        """
         deepest = max(1, self.depth - 1)
         return min(1.0, max(0.0, self._noise(x, y) + self.depth_slope * (z / deepest)))
 
     def _noise(self, x: float, y: float) -> float:
-        """Multi-octave value noise in [0, 1], centred on 0.5.
-
-        Each octave doubles the frequency and halves the amplitude: the first
-        one shapes the region, the rest only add detail. The weights sum to 1,
-        so the weighted sum of waves is again a value in [0, 1] and dropping an
-        axis would not silently rescale the field.
-
-        The mean is 0.5 for any phase offset, which is the property that makes
-        the band thresholds meaningful. It holds because ``noise_scale`` is
-        even: each axis then covers a whole number of wave periods, and a
-        triangle sampled evenly across whole periods averages to its midpoint.
-        Change the scale to an odd number and the offset starts dragging the
-        whole map toward one end of the band table.
-        """
         total = 0.0
         norm = 0.0
         amplitude = 1.0
@@ -149,8 +102,114 @@ class TerrainField:
             frequency *= 2
         return (total / norm) if norm else 0.0
 
+    def _noise_seed(self) -> int:
+        """Seed entera determinista derivada del origin (o sea, de la seed)."""
+        return int(self.origin[0] * 1000 + self.origin[1] * 1000
+                   + self.width * 131 + self.height * 17)
+
+    def _draw_noise_params(self, rng: random.Random):
+        """Sortea los parámetros de los 3 ruidos. Todo sale de la seed."""
+        # 1. ESTRELLA: brazos radiales desde un centro aleatorio.
+        star = {
+            "cx": rng.uniform(0, self.width),
+            "cy": rng.uniform(0, self.height),
+            "arms": rng.randint(3, 5),
+            "phase": rng.uniform(0, 2 * math.pi),
+            "radial": rng.uniform(0.10, 0.30),
+        }
+        # 2. MANCHAS: gaussianas con centro y sigma aleatorios.
+        blobs = [
+            (rng.uniform(0, self.width),
+             rng.uniform(0, self.height),
+             rng.uniform(2.0, 6.0))
+            for _ in range(rng.randint(8, 14))
+        ]
+        # 3. ONDAS: senos direccionales con ángulo/frecuencia/fase aleatorios.
+        waves = [
+            (rng.uniform(0, math.pi),
+             rng.uniform(0.08, 0.28),
+             rng.uniform(0, 2 * math.pi))
+            for _ in range(3)
+        ]
+        return star, blobs, waves
+
+    def _star_value(self, x: float, y: float, p) -> float:
+        dx, dy = x - p["cx"], y - p["cy"]
+        r = math.hypot(dx, dy)
+        theta = math.atan2(dy, dx)
+        return 0.5 + 0.5 * math.cos(p["arms"] * theta + p["phase"]) * math.cos(r * p["radial"])
+
+    def _blobs_value(self, x: float, y: float, blobs) -> float:
+        return sum(
+            math.exp(-((x - bx) ** 2 + (y - by) ** 2) / (2 * sig ** 2))
+            for bx, by, sig in blobs
+        )
+
+    def _waves_value(self, x: float, y: float, waves) -> float:
+        return sum(
+            0.5 + 0.5 * math.sin(
+                2 * math.pi * (x * math.cos(a) + y * math.sin(a)) * f + ph)
+            for a, f, ph in waves
+        ) / len(waves)
+
+    @staticmethod
+    def _normalize(field: List[List[float]]) -> List[List[float]]:
+        lo = min(min(row) for row in field)
+        hi = max(max(row) for row in field)
+        if hi - lo < 1e-9:
+            return [[0.5 for _ in row] for row in field]
+        return [[(v - lo) / (hi - lo) for v in row] for row in field]
+
+    def height_at(self, x: int, y: int) -> int:
+        if self.depth <= 1:
+            return 0
+        if self._heightmap is None:
+            self._heightmap = self._build_heightmap()
+        return self._heightmap[x][y]
+
+    def heightmap(self) -> List[List[int]]:
+        if self.depth <= 1:
+            return [[0 for _ in range(self.height)] for _ in range(self.width)]
+        if self._heightmap is None:
+            self._heightmap = self._build_heightmap()
+        return [row[:] for row in self._heightmap]
+
+    def is_surface(self, x: int, y: int, z: int) -> bool:
+        return z == self.height_at(x, y)
+
+    def is_interior(self, x: int, y: int, z: int) -> bool:
+        return z < self.height_at(x, y)
+
+    def _build_heightmap(self) -> List[List[int]]:
+        """Estrella + manchas + ondas -> promedio -> contraste -> cuantización.
+
+        Sin pasadas de mediana, sin recorte de picos y sin sublomas: lo que
+        sale de los 3 ruidos es el terreno final.
+        """
+        rng = random.Random(self._noise_seed())
+        star_p, blobs_p, waves_p = self._draw_noise_params(rng)
+        f_star = [[self._star_value(x, y, star_p)
+                   for y in range(self.height)] for x in range(self.width)]
+        f_blobs = [[self._blobs_value(x, y, blobs_p)
+                    for y in range(self.height)] for x in range(self.width)]
+        f_waves = [[self._waves_value(x, y, waves_p)
+                    for y in range(self.height)] for x in range(self.width)]
+        f_star = self._normalize(f_star)
+        f_blobs = self._normalize(f_blobs)
+        f_waves = self._normalize(f_waves)
+        raw: List[List[int]] = [[0 for _ in range(self.height)] for _ in range(self.width)]
+        for x in range(self.width):
+            for y in range(self.height):
+                n = (f_star[x][y] + f_blobs[x][y] + f_waves[x][y]) / 3.0
+                # Contraste: estira el promedio alrededor de 0.5 para que el
+                # mapa use todo el rango [0, depth-1].
+                n = 0.5 + (n - 0.5) * self.height_contrast
+                n = max(0.0, min(1.0, n))
+                h = int(n * (self.depth - 1) + 0.5)
+                raw[x][y] = max(0, min(self.depth - 1, h))
+        return raw
+
     def terrain_at(self, x: int, y: int, z: int) -> str:
-        """Terrain name at a cell, resolved through the bands."""
         value = self.value(x + self.origin[0], y + self.origin[1], z)
         for edge, name in self.bands:
             if value < edge:
@@ -158,7 +217,6 @@ class TerrainField:
         return self.bands[-1][1]
 
     def layer_profile(self, z: int) -> Dict[str, int]:
-        """Terrain counts for one layer. Diagnostic for calibration."""
         counts: Dict[str, int] = {}
         for x in range(self.width):
             for y in range(self.height):
@@ -166,17 +224,21 @@ class TerrainField:
                 counts[name] = counts.get(name, 0) + 1
         return counts
 
+    def surface_profile(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for x in range(self.width):
+            for y in range(self.height):
+                z = self.height_at(x, y)
+                name = self.terrain_at(x, y, z)
+                counts[name] = counts.get(name, 0) + 1
+        return counts
+
     def __repr__(self) -> str:
         return (f"TerrainField({self.width}x{self.height}x{self.depth}, "
                 f"scale={self.scale}, octaves={self.octaves}, "
-                f"slope={self.depth_slope}, bands={len(self.bands)})")
+                f"slope={self.depth_slope}, bands={len(self.bands)}, "
+                f"h_contrast={self.height_contrast})")
 
 
 def _wave(position: float, extent: int) -> float:
-    """A smooth per-axis wave in [0, 1]. Cheap stand-in for Perlin noise.
-
-    Peaks at 1.0 on position 0, troughs at 0.0 on ``extent``, and repeats every
-    ``2 * extent``. With frequency ``f`` the argument advances ``f / extent``
-    per cell, so an axis of ``extent`` cells covers ``f / 2`` whole periods.
-    """
     return abs((position / max(1, extent)) % 2.0 - 1.0)

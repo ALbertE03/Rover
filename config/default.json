@@ -1,42 +1,9 @@
 {
-  "map": {
-    "max_axis": 64,
-    "min_axis": 5,
-    "width": 12,
-    "height": 12,
-    "depth": 3,
-    "block_rate": 0.06
-  },
-  "terrain": {
-    "plain": {
-      "cost": 1.0,
-      "visibility": 0.90,
-      "glyph": "."
-    },
-    "sand": {
-      "cost": 1.5,
-      "visibility": 0.75,
-      "glyph": ":"
-    },
-    "rock": {
-      "cost": 2.2,
-      "visibility": 0.60,
-      "glyph": "#"
-    },
-    "crevasse": {
-      "cost": 3.2,
-      "visibility": 0.35,
-      "glyph": "/"
-    }
-  },
   "generation": {
-    "noise_scale": 2,
-    "noise_octaves": 3,
     "axis_weights": {
       "x": 0.5,
       "y": 0.5
     },
-    "depth_slope": 0.2,
     "bands": [
       {
         "max": 0.55,
@@ -51,20 +18,34 @@
         "terrain": "rock"
       },
       {
-        "max": 1.00,
+        "max": 1.0,
         "terrain": "crevasse"
       }
-    ]
+    ],
+    "depth_slope": 0.2,
+    "noise_octaves": 3,
+    "noise_scale": 2,
+    "height_contrast": 2.0
+  },
+  "map": {
+    "block_rate": 0.06,
+    "depth": 3,
+    "height": 12,
+    "max_axis": 64,
+    "min_axis": 5,
+    "width": 12
   },
   "movement": {
-    "radius": 1.0,
-    "climb_penalty": 0.6
+    "climb_penalty": 0.6,
+    "radius": 1.8,
+    "survey_height_bonus": 2.0,
+    "allow_diagonal": false
   },
   "network": {
     "stations": [
       {
         "id": "base",
-        "radius": 5.0,
+        "radius": 0.0,
         "signal": 1.0
       },
       {
@@ -76,10 +57,34 @@
   },
   "poi": {
     "count": 3,
-    "min_visibility": 0.7
+    "min_visibility": 0.7,
+    "interest_climb_weight": 0.6,
+    "interest_ground_weight": 0.4
   },
   "rover": {
     "battery": 75.0,
     "memory": 2.0
+  },
+  "terrain": {
+    "crevasse": {
+      "cost": 3.2,
+      "glyph": "/",
+      "visibility": 0.35
+    },
+    "plain": {
+      "cost": 1.0,
+      "glyph": ".",
+      "visibility": 0.9
+    },
+    "rock": {
+      "cost": 2.2,
+      "glyph": "#",
+      "visibility": 0.6
+    },
+    "sand": {
+      "cost": 1.5,
+      "glyph": ":",
+      "visibility": 0.75
+    }
   }
 }

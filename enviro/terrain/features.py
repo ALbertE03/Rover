@@ -18,7 +18,8 @@ class Station:
     Attributes:
         id: Station name.
         center: Antenna position.
-        radius: Nominal range in grid units.
+        radius: Nominal range in grid units. 0 means a point station: the
+            rover must stand on its cell to link.
         signal: Link quality in (0, 1].
     """
     id: str
@@ -53,10 +54,15 @@ class Poi:
         cell_id: Where it sits.
         min_visibility: Survey quality the observer's own ground needs before
             the point is legible from there.
+        interest: Cost/reward score in [0, 1] assigned at generation: costly
+            to reach (high ground, expensive terrain), rewarding to hold
+            (high ground surveys further). Two points with the same score are
+            not the same trip.
     """
     id: str
     cell_id: str
     min_visibility: float = 0.0
+    interest: float = 0.0
 
     def __repr__(self) -> str:
         return f"Poi({self.id} @ {self.cell_id})"

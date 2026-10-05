@@ -3,10 +3,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from ..config import load_config,get
-from .catalogue import terrain
+from .catalogue import terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
-from .grid import Cell, cell_id, distance, neighbour_offsets, parse_cell_id, reachable_cells
+from .grid import Cell, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
 from .instance import Map, MapParams
 
 
@@ -28,8 +28,9 @@ class InstanceParams:
         depth: Vertical layers.
         block_rate: Probability of a boulder per cell, in [0, 1].
         poi_count: Number of points of interest.
-        station_count: Stations to place, 1 or 2. Two is the interesting case,
-            because a weak relay covers only part of what the base covers.
+        station_count: Stations to place (>= 1). They spread by farthest-point
+            fill: first random, each next as far as possible from the placed
+            ones, so extra bases actually cover new ground.
         seed: Seed for the whole instance. None means an unseeded map.
         config_path: Alternate configuration file.
     """
@@ -53,10 +54,9 @@ class InstanceParams:
             raise ValueError(f"depth must be >= 0, got {self.depth}")
         if self.poi_count < 0:
             raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
-        if self.station_count not in (1, 2):
+        if self.station_count < 1:
             raise ValueError(
-                f"station_count must be 1 or 2, got {self.station_count}. Three "
-                f"stations is a different problem, not a different instance."
+                f"station_count must be >= 1, got {self.station_count}."
             )
         if self.seed is not None and not isinstance(self.seed, int):
             raise ValueError(f"seed must be an int or None, got {type(self.seed).__name__}")
@@ -190,36 +190,58 @@ class MapGenerator:
             block_rate=self.params.block_rate,
             move_radius=float(movement["radius"]),
             climb_penalty=float(movement["climb_penalty"]),
+            move_allow_diagonal=bool(movement.get("allow_diagonal", True)),
             poi_count=self.params.poi_count,
             poi_min_visibility=float(poi["min_visibility"]),
+            poi_interest_climb_weight=float(poi.get("interest_climb_weight", 0.6)),
+            poi_interest_ground_weight=float(poi.get("interest_ground_weight", 0.4)),
             stations=stations,
             battery=float(rover["battery"]),
             memory=float(rover["memory"]),
+            survey_height_bonus=float(movement.get("survey_height_bonus", 2.0)),
             seed=self.params.seed,
         )
 
     # construction 
 
     def _place_terrain(self) -> Dict[str, Cell]:
-        """One cell per grid position, terrain from the field."""
+        """Terreno disperso en z: solo hay bloques donde hay loma.
+
+        Para cada (x, y), h = height_at(x, y) en [0, depth-1]:
+        - z > h: aire, no se crea celda.
+        - z == h: superficie transitable (cima plana de la meseta).
+        - z < h: interior sólido de la loma, bloqueado. No se puede estar
+          en (1,1,1) si la loma llega a (1,1,2): hay que subir por fuera.
+
+        Así el eje z solo crea bloques donde hay lomas y las lomas son
+        mesetas de varias celdas planas arriba (ver TerrainField).
+        """
         cells: Dict[str, Cell] = {}
-        for z in range(self.params.depth):
-            for x in range(self.params.width):
-                for y in range(self.params.height):
+        for x in range(self.params.width):
+            for y in range(self.params.height):
+                h = self.field.height_at(x, y)
+                for z in range(self.params.depth):
+                    if z > h:
+                        continue  # aire
                     id_ = cell_id(x, y, z)
-                    cells[id_] = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
+                    cell = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
+                    if z < h:
+                        cell.blocked = True  # interior sólido
+                    cells[id_] = cell
         return cells
 
     def _place_boulders(self, cells: Dict[str, Cell]) -> None:
-        """Block cells independently with probability ``block_rate``.
+        """Block surface cells independently with probability ``block_rate``.
 
-        Independent per cell on purpose. Boulder fields clump in reality, but a
-        clumped rule needs another knob and another thing to calibrate, and
-        the connectivity guarantee in step 4 already keeps the map solvable
-        whatever the draw does.
+        Solo la superficie puede tener boulders. El interior ya está
+        bloqueado por ser sólido y el aire no existe como celda.
         """
         for cell in cells.values():
-            cell.blocked = self.rng.random() < self.params.block_rate
+            x, y, z = cell.pos
+            if not self.field.is_surface(x, y, z):
+                continue
+            if not cell.blocked:
+                cell.blocked = self.rng.random() < self.params.block_rate
 
     def _place_stations(self, cells: Dict[str, Cell]) -> Tuple[Station, ...]:
         """Place stations on the surface, as far apart as the map allows."""
@@ -230,22 +252,50 @@ class MapGenerator:
                 "every surface cell is blocked; lower block_rate or enlarge the map"
             )
 
-        centers = [self.rng.choice(candidates).pos]
-        if len(presets) > 1:
-            farthest = max(candidates, key=lambda c: (distance(c.pos, centers[0]), c.id))
-            centers.append(farthest.pos)
+        grid = self.config.get("network", {}).get("grid")
+        if grid:
+            # Malla: puntos evenly spaced, cada uno anclado a la celda
+            # transitable más cercana. Para baterías chicas: la malla
+            # garantiza saltos cortos entre bases vecinas.
+            nx, ny = int(grid[0]), int(grid[1])
+            if nx < 1 or ny < 1 or nx * ny < len(presets):
+                raise ValueError(
+                    f"network.grid {grid} must cover {len(presets)} stations."
+                )
+            centers = []
+            for i in range(nx):
+                for j in range(ny):
+                    gx = (i + 0.5) * self.params.width / nx
+                    gy = (j + 0.5) * self.params.height / ny
+                    best = min(candidates,
+                               key=lambda c: (distance(c.pos, (gx, gy, 0)), c.id))
+                    centers.append(best.pos)
+            centers = centers[: len(presets)]
+        else:
+            centers = [self.rng.choice(candidates).pos]
+            while len(centers) < len(presets):
+                farthest = max(
+                    candidates,
+                    key=lambda c: (min(distance(c.pos, p) for p in centers), c.id),
+                )
+                centers.append(farthest.pos)
 
         return place_stations(presets, tuple(centers), self.map_params.diagonal)
 
     def _place_pois(self, cells: Dict[str, Cell]) -> List[Poi]:
         """Place points of interest on reachable, observable, well-spread ground.
 
-        Three rules, all about instance quality rather than realism:
+        Four rules, all about instance quality rather than realism:
 
         * **Reachable from the surface.** Nothing interesting is walled off.
         * **Observable.** Some cell next to it has ground clear enough to see
           it from, checked with the true terrain because nothing is surveyed
           yet at generation time.
+        * **Interesting.** Costly to reach, rewarding to hold: high ground
+          costs climbing but pays back survey radius; expensive terrain costs
+          battery to stand on. Each layer contributes its most interesting
+          candidate, so the bill differs per point instead of every point
+          costing the same trip.
         * **Spread.** One per layer first, so depth has to be descended into,
           and each one placed as far from the others as the map allows. Two
           points of interest a cell apart are one trip, not two.
@@ -257,14 +307,21 @@ class MapGenerator:
             by_layer.setdefault(parse_cell_id(id_)[2], []).append(id_)
 
         chosen: List[str] = []
-        for layer in sorted(by_layer):
+        # Las capas compiten por interés: la más interesante aporta el primer
+        # POI. Así, con más capas que POIs, los puntos caen donde el costo y
+        # la recompensa están, no en las capas bajas por defecto.
+        layer_interest = {
+            layer: max(self._interest(cells[id_]) for id_ in ids)
+            for layer, ids in by_layer.items()
+        }
+        for layer in sorted(by_layer, key=lambda l: (-layer_interest[l], l)):
             if len(chosen) >= self.params.poi_count:
                 break
-            chosen.append(self._farthest(cells, by_layer[layer], chosen))
+            chosen.append(self._best(cells, by_layer[layer], chosen))
         spare = [id_ for ids in by_layer.values() for id_ in ids if id_ not in chosen]
         self.rng.shuffle(spare)
         while spare and len(chosen) < self.params.poi_count:
-            pick = self._farthest(cells, spare, chosen, exclude=chosen)
+            pick = self._best_spread(cells, spare, chosen)
             chosen.append(pick)
             spare.remove(pick)
 
@@ -277,10 +334,71 @@ class MapGenerator:
 
         pois: List[Poi] = []
         for index, id_ in enumerate(chosen):
-            poi = Poi(f"poi_{index}", id_, threshold)
+            poi = Poi(f"poi_{index}", id_, threshold, self._interest(cells[id_]))
             cells[id_].poi_id = poi.id
             pois.append(poi)
         return pois
+
+    def _interest(self, cell: Cell) -> float:
+        """Cost/reward score of a POI candidate, in [0, 1].
+
+        Climbing is both the cost and the reward: higher ground takes more
+        work to reach and surveys further once held. Expensive terrain adds
+        cost on top. Weights come from the poi config so an experiment can
+        move the emphasis without touching the generator.
+        """
+        p = self.map_params
+        total = p.poi_interest_climb_weight + p.poi_interest_ground_weight
+        if total <= 0:
+            return 0.0
+        climb = cell.pos[2] / max(1, p.depth - 1)
+        costs = [terrain(name).cost for name in terrain_names()]
+        span = max(costs) - min(costs)
+        ground = (terrain(cell.true_terrain).cost - min(costs)) / span if span > 0 else 0.0
+        return (p.poi_interest_climb_weight * climb + p.poi_interest_ground_weight * ground) / total
+
+    def _best(
+        self,
+        cells: Dict[str, Cell],
+        candidates: Sequence[str],
+        chosen: Sequence[str],
+    ) -> str:
+        """Highest-interest candidate; near-ties broken by spread.
+
+        Candidates within 5% of the best interest count as tied, and the
+        farthest of those wins, so a marginally more interesting cell does
+        not pull two points of interest next to each other.
+        """
+        scored = [(self._interest(cells[id_]), id_) for id_ in candidates]
+        best = max(score for score, _ in scored)
+        pool = [id_ for score, id_ in scored if score >= best * 0.95]
+        return self._farthest(cells, pool, chosen)
+
+    def _best_spread(
+        self,
+        cells: Dict[str, Cell],
+        spare: Sequence[str],
+        chosen: Sequence[str],
+    ) -> str:
+        """Fill pick: half interest, half distance from what's placed."""
+        interests = {id_: self._interest(cells[id_]) for id_ in spare}
+        placed = [parse_cell_id(id_) for id_ in chosen]
+        dists = {
+            id_: min(distance(parse_cell_id(id_), pos) for pos in placed)
+            for id_ in spare
+        }
+        imax = max(interests.values())
+        dmax = max(dists.values())
+
+        def norm(value: float, top: float) -> float:
+            return value / top if top > 0 else 0.0
+
+        scored = [
+            (0.5 * norm(interests[id_], imax) + 0.5 * norm(dists[id_], dmax), id_)
+            for id_ in spare
+        ]
+        best = max(score for score, _ in scored)
+        return self.rng.choice([id_ for score, id_ in scored if score == best])
 
     def _observable_cells(self, cells: Dict[str, Cell], threshold: float) -> Set[str]:
         """Reachable cells that something can be observed from.
@@ -289,14 +407,14 @@ class MapGenerator:
         computed with the same rule a consumer would use, not a second
         approximation of it.
         """
-        offsets = neighbour_offsets(self.map_params.move_radius)
-        starts = [
-            cell_id(x, y, 0)
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if cells[cell_id(x, y, 0)].traversable
-        ]
-        reachable = reachable_cells(cells, starts, offsets)
+        move_offsets = movement_offsets(
+            self.map_params.move_radius, self.map_params.move_allow_diagonal
+        )
+        # Observation is about distance and clear ground, not about how the
+        # rover walks: the vantage scan stays euclidean.
+        view_offsets = neighbour_offsets(self.map_params.move_radius)
+        starts = [c.id for c in self._surface_cells(cells)]
+        reachable = reachable_cells(cells, starts, move_offsets)
 
         observable: Set[str] = set()
         for id_ in reachable:
@@ -304,7 +422,7 @@ class MapGenerator:
             if cell.poi_id:
                 continue
             x, y, z = cell.pos
-            for dx, dy, dz in offsets:
+            for dx, dy, dz in view_offsets:
                 vantage = cells.get(cell_id(x + dx, y + dy, z + dz))
                 if vantage is None or not vantage.traversable:
                     continue
@@ -339,13 +457,19 @@ class MapGenerator:
         return self.rng.choice([id_ for score, id_ in scored if score == best])
 
     def _surface_cells(self, cells: Dict[str, Cell]) -> List[Cell]:
-        """Traversable cells on the top layer, in a stable order."""
-        return [
-            cells[cell_id(x, y, 0)]
-            for x in range(self.params.width)
-            for y in range(self.params.height)
-            if not cells[cell_id(x, y, 0)].blocked
-        ]
+        """Celdas transitables en la superficie real (cima de cada columna).
+
+        Ya no es z=0: es z == height_at(x, y). En orden estable para que
+        la generación sea reproducible.
+        """
+        out: List[Cell] = []
+        for x in range(self.params.width):
+            for y in range(self.params.height):
+                h = self.field.height_at(x, y)
+                c = cells.get(cell_id(x, y, h))
+                if c is not None and c.traversable:
+                    out.append(c)
+        return out
 
     def __repr__(self) -> str:
         return f"MapGenerator(seed={self.params.seed})"
