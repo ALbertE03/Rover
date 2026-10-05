@@ -354,7 +354,14 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 """ + "\n".join(
         f"#t-{e['seed']}:checked~#sec-{e['seed']}{{display:block}}"
         for e in entries) + """
-.cmp-grid{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start}
+.cmp-card .stats{font-size:12px;margin-top:8px;line-height:1.7}
+@media(max-width:600px){
+  body{padding:10px}
+  .tabs label{padding:8px 14px;font-size:13px}
+  .grid{flex-direction:column}
+  .panel{width:100%;box-sizing:border-box}
+}
 </style></head><body>
 <h1>""" + heading + f"""</h1>
 <div class="note">Cada mapa nace de <b>3 ruidos aleatorios</b> (estrella + manchas + ondas)
@@ -373,56 +380,30 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
 </div>
 """)
 
-    # ---- Comparison tab (default) ----
+    # ---- Comparison tab (default): final maps side by side + stats ----
     parts.append('<div class="tabsec" id="sec-cmp">')
     parts.append("<h2>Comparaci\u00f3n de terrenos</h2>")
     parts.append("<div class='cmp-grid'>")
     for e in entries:
         seed = e["seed"]
-        h64 = _png_b64(_map_png(e, "height", scale=8))
-        t64 = _png_b64(_map_png(e, "terrain", scale=8))
+        t64 = _png_b64(_map_png(e, "terrain", scale=10))
+        # compact stats for this seed
+        n_cells = e["W"] * e["H"]
+        hdist = " \u00b7 ".join(
+            f"z{z}: {c}" for z, c in enumerate(e["layer_hist"]))
+        tmix = " \u00b7 ".join(
+            f"{k}: {v}" for k, v in sorted(e["terrain_mix"].items()))
         parts.append(
-            f"<div class='panel'><h3>Seed {seed}</h3>"
-            f"<img class='viz' src='{h64}'><br>"
-            f"<img class='viz' src='{t64}' style='margin-top:8px'>"
-            f"<div class='legend'>arriba: altura z \u00b7 abajo: terrenos</div></div>")
+            f"<div class='panel cmp-card'><h3>Seed {seed}</h3>"
+            f"<img class='viz' src='{t64}'>"
+            f"<div class='stats'>"
+            f"<div><b>{len(e['boulders'])}</b> rocas \u25b2 \u00b7 "
+            f"<b>{len(e['pois'])}</b> POIs \u00b7 "
+            f"<b>{len(e['stations'])}</b> bases</div>"
+            f"<div class='dim'>Altura \u2014 {hdist}</div>"
+            f"<div class='dim'>Terreno \u2014 {tmix}</div>"
+            f"</div></div>")
     parts.append("</div>")
-
-    parts.append("<h2>N\u00fameros lado a lado</h2>")
-    parts.append('<table class="kv"><tr><th></th>' +
-                 "".join(f"<th>Seed {e['seed']}</th>" for e in entries) + "</tr>")
-    depth = entries[0]["depth"]
-    max_hist = max(max(e["layer_hist"]) for e in entries)
-    for z in range(depth):
-        parts.append(f"<tr><td>Altura z={z}</td>")
-        for e in entries:
-            c = e["layer_hist"][z] if z < len(e["layer_hist"]) else 0
-            pct = 100 * c / (e["W"] * e["H"])
-            w = 100 * c / max_hist if max_hist else 0
-            col = e["height_colors"][z]
-            parts.append(
-                f"<td class='num'>{c} ({pct:.0f}%)</td>"
-                f"<td class='bar'><span style='width:{w:.0f}%;background:{col}'></span></td>")
-        parts.append("</tr>")
-    terrains = sorted({t for e in entries for t in e["terrain_mix"]})
-    max_mix = max(max(e["terrain_mix"].values()) for e in entries)
-    tcol = {"plain": "#4a7c59", "sand": "#c9a227", "rock": "#6b7280", "crevasse": "#1f2937"}
-    tnames = {"plain": "llano", "sand": "arena", "rock": "roca", "crevasse": "grieta"}
-    for t in terrains:
-        parts.append(f"<tr><td>{tnames.get(t, t)}</td>")
-        for e in entries:
-            c = e["terrain_mix"].get(t, 0)
-            w = 100 * c / max_mix if max_mix else 0
-            parts.append(
-                f"<td class='num'>{c}</td>"
-                f"<td class='bar'><span style='width:{w:.0f}%;background:{tcol.get(t,'#888')}'></span></td>")
-        parts.append("</tr>")
-    for label, key in [("Rocas \u25b2", "boulders"), ("POIs", "pois"), ("Bases", "stations")]:
-        parts.append(f"<tr><td>{label}</td>")
-        for e in entries:
-            parts.append(f"<td class='num' colspan='2'>{len(e[key])}</td>")
-        parts.append("</tr>")
-    parts.append("</table>")
     parts.append('</div>')
 
     # ---- Per-seed tabs ----
