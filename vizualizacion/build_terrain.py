@@ -2,7 +2,7 @@ import json
 from dataclasses import replace
 from html import escape
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional,Tuple
 
 from enviro.config import load_config
 from enviro.terrain import (
@@ -30,6 +30,7 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
     gen = MapGenerator(params)
     m = gen.create()
     field = gen.field
+    
     hm = field.heightmap()
 
     def sid(x: int, y: int) -> str:
@@ -88,6 +89,8 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
     return {
         "seed": seed, "W": width, "H": height, "depth": depth,
         "noise": nz,
+        "block_rate":gen.config['map']['block_rate'],
+        "gen":gen.config["generation"]['height_contrast'],
         "heightmap": hm,
         "terrain": terrain,
         "terrain_mix": mix,
@@ -162,11 +165,11 @@ def _quant_report(e: Dict) -> str:
 
     if e["top_layer_flat"] < e["top_layer"]:
         stretch = (f"El estiramiento es lo que llega a z={e['top_layer']}: con "
-                   f"<code>height_contrast=1</code> este mapa se queda en "
+                   f"<code>height_contrast={e["gen"]}</code> este mapa se queda en "
                    f"z={e['top_layer_flat']} y la capa alta saldría vacía.")
     else:
         stretch = (f"Con depth={depth} el estiramiento no es lo que llega a "
-                   f"z={e['top_layer']}: <code>height_contrast=1</code> también "
+                   f"z={e['top_layer']}: <code>height_contrast={e["gen"]}</code> también "
                    f"llega (z={e['top_layer_flat']}). Lo que cambia es cómo se reparten "
                    f"las columnas, no si la cima existe.")
 
@@ -195,7 +198,7 @@ def _quant_report(e: Dict) -> str:
         "</div>")
 
 
-def render_html(entries: List[Dict], title: str = "Terrenos") -> str:
+def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
     """Self-contained HTML showing the pipeline behind every map."""
     heading = escape(title)
     parts = []
@@ -229,15 +232,13 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 .dim{color:#79839a;font-size:11px}
 .feat{margin-top:8px;line-height:2}
 </style></head><body>
-<h1>""" + heading + """</h1>
+<h1>""" + heading + f"""</h1>
 <div class="note">Cada mapa nace de <b>3 ruidos aleatorios</b> (estrella + manchas + ondas)
-&rarr; promedio &rarr; contraste &rarr; <b>cuantizaci&oacute;n</b>. Sin suavizados.
-Las <b>rocas \u25b2</b> (<code>block_rate=0.06</code> por columna) bloquean el paso.</div>
+&rarr; promedio &rarr; contraste &rarr; <b>cuantizaci&oacute;n</b>.
+Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por columna) bloquean el paso.</div>
 
 <h2>C&oacute;mo funciona la cuantizaci&oacute;n</h2>
-<div class="note">La altura de una columna no es un float. Es una de las
-<code>depth</code> capas discretas, y elegir cu&aacute;l es cuatro l&iacute;neas de
-aritm&eacute;tica (<code>enviro/terrain/field.py</code>, <code>_build_heightmap</code>):
+<div class="note">
 <ol class="steps">
 <li><b>Promediar</b> los tres ruidos normalizados &rarr;
 <code>n = (estrella + manchas + ondas) / 3</code></li>

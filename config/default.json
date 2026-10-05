@@ -25,7 +25,7 @@
     "depth_slope": 0.2,
     "noise_octaves": 3,
     "noise_scale": 2,
-    "height_contrast": 2.0
+    "height_contrast": 3.0
   },
   "map": {
     "block_rate": 0.06,
