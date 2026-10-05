@@ -163,6 +163,9 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
         "clamped_low": sum(1 for v in flat_post if v < 0.0),
         "clamped_high": sum(1 for v in flat_post if v > 1.0),
         "layer_hist": hist,
+        "biome_map": [[field.biome_at(x, y) for y in range(height)]
+                      for x in range(width)],
+        "biome_centers": field.biome_centers,
         "top_layer": max((z for z, n in enumerate(hist) if n), default=0),
         "top_layer_flat": max((layer_of(v, 1.0) for v in flat_avg), default=0),
     }
@@ -350,6 +353,23 @@ def _map_png(e: Dict, kind: str, scale: int = 10):
                 for a in range(scale):
                     for b in range(scale):
                         px[i * scale + a, j * scale + b] = c
+    elif kind == "biomes":
+        bcol = [(122, 162, 247), (158, 206, 106), (255, 158, 100),
+                (186, 110, 220), (100, 200, 200)]
+        bm = e["biome_map"]
+        for i in range(W):
+            for j in range(H):
+                b = bm[i][j]
+                c = bcol[b % len(bcol)] if b >= 0 else (40, 40, 40)
+                for a in range(scale):
+                    for b_ in range(scale):
+                        px[i * scale + a, j * scale + b_] = c
+        # mark centers
+        d = ImageDraw.Draw(img)
+        for cx, cy in e["biome_centers"]:
+            x, y = int(cx * scale), int(cy * scale)
+            d.ellipse([x - 5, y - 5, x + 5, y + 5],
+                      fill=(255, 255, 255), outline=(0, 0, 0), width=2)
     elif kind == "terrain":
         tcol = {t["name"]: t["rgb"] for t in e["terrain_catalogue"]}
         for i in range(W):
@@ -567,7 +587,8 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
             ("combined", "4. Promedio de los 3"),
             ("contrast", f"5. Contraste (x{e['contrast']:g}) + recorte [0,1]"),
             ("height", "6. Cuantizada \u2192 altura z"),
-            ("terrain", "7. Terrenos + rocas \u25b2"),
+            ("biomes", f"7. Biomas ({len(e['biome_centers'])} regiones Voronoi)"),
+            ("terrain", "8. Terrenos por bioma + rocas \u25b2 + lava"),
         ]
         for kind, name in stages:
             b64 = _png_b64(_map_png(e, kind, scale=max(4, 480 // W)))
