@@ -340,12 +340,15 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 .mB{color:#7ef0a0}.mR{color:#ffa94d}.mO{color:#c792ea}.mA{color:#ff8787}
 .dim{color:#79839a;font-size:11px}
 .feat{margin-top:8px;line-height:2}
-/* CSS-only tabs */
+/* CSS-only tabs: inputs, .tabs and .tabsec are all siblings */
+.tabinput{display:none}
 .tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
-.tabs input{display:none}
 .tabs label{background:#2b3a55;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer}
 .tabs label:hover{background:#3a4d73}
-.tabs input:checked+label{background:#4c6ef5}
+""" + "\n".join(
+        f'#t-{e["seed"]}:checked~.tabs label[for="t-{e["seed"]}"],'
+        for e in entries) + """
+#t-cmp:checked~.tabs label[for="t-cmp"]{background:#4c6ef5}
 .tabsec{display:none}
 #t-cmp:checked~#sec-cmp{display:block}
 """ + "\n".join(
@@ -358,10 +361,13 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 &rarr; promedio &rarr; contraste &rarr; <b>cuantizaci&oacute;n</b>.
 Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por columna) bloquean el paso.</div>
 
-<div class="tabs">
-<input type="radio" name="tab" id="t-cmp" checked><label for="t-cmp">Comparaci\u00f3n</label>
+<input type="radio" name="tab" id="t-cmp" class="tabinput" checked>
 """ + "\n".join(
-        f'<input type="radio" name="tab" id="t-{e["seed"]}">'
+        f'<input type="radio" name="tab" id="t-{e["seed"]}" class="tabinput">'
+        for e in entries) + """
+<div class="tabs">
+<label for="t-cmp">Comparaci\u00f3n</label>
+""" + "\n".join(
         f'<label for="t-{e["seed"]}">Seed {e["seed"]}</label>'
         for e in entries) + """
 </div>
