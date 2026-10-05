@@ -1,8 +1,24 @@
 import math
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TypedDict
 from ..config import get
 from .catalogue import terrain_names
+
+
+class NoisePipeline(TypedDict):
+    """What :meth:`TerrainField.noise_pipeline` hands back.
+
+    A TypedDict rather than ``Dict[str, ...]`` because the grids and the
+    scalar metadata travel in the same mapping: a plain dict would have to
+    collapse to ``object`` and every reader would lose the element type.
+    """
+    star: List[List[float]]
+    blobs: List[List[float]]
+    waves: List[List[float]]
+    combined: List[List[float]]
+    star_arms: int
+    star_center: Tuple[float, float]
+    n_blobs: int
 
 
 class TerrainField:
@@ -174,7 +190,7 @@ class TerrainField:
             self._heightmap = self._build_heightmap()
         return [row[:] for row in self._heightmap]
 
-    def noise_pipeline(self) -> Dict[str, object]:
+    def noise_pipeline(self) -> NoisePipeline:
         """The 3 heightmap noises, normalized, plus their average.
 
         For visualization: shows what the terrain is made of before
@@ -187,15 +203,18 @@ class TerrainField:
         fb = [[self._blobs_value(x, y, blobs_p) for y in range(h)] for x in range(w)]
         fw = [[self._waves_value(x, y, waves_p) for y in range(h)] for x in range(w)]
         ns, nb, nw = self._normalize(fs), self._normalize(fb), self._normalize(fw)
-        combined = [[(ns[x][y] + nb[x][y] + nw[x][y]) / 3.0
-                     for y in range(h)] for x in range(w)]
+        combined: List[List[float]] = [
+            [(ns[x][y] + nb[x][y] + nw[x][y]) / 3.0 for y in range(h)]
+            for x in range(w)
+        ]
         return {
             "star": ns,
             "blobs": nb,
             "waves": nw,
             "combined": combined,
-            "star_arms": star_p["arms"],
-            "star_center": (round(star_p["cx"], 1), round(star_p["cy"], 1)),
+            "star_arms": int(star_p["arms"]),
+            "star_center": (round(float(star_p["cx"]), 1),
+                            round(float(star_p["cy"]), 1)),
             "n_blobs": len(blobs_p),
         }
 

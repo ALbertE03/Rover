@@ -2,7 +2,7 @@ import json
 from dataclasses import replace
 from html import escape
 from pathlib import Path
-from typing import Dict, List, Optional,Tuple
+from typing import Dict, List, Optional
 
 from enviro.config import load_config
 from enviro.terrain import (
@@ -30,7 +30,6 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
     gen = MapGenerator(params)
     m = gen.create()
     field = gen.field
-    
     hm = field.heightmap()
 
     def sid(x: int, y: int) -> str:
@@ -54,7 +53,7 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
     # knob, so the page can explain the arithmetic without the generator
     # having to expose a second, parallel copy of it.
     nz = field.noise_pipeline()
-    combined = nz["combined"]
+    combined: List[List[float]] = nz["combined"]
     contrast = float(field.height_contrast)
     span = max(1, depth - 1)
 
@@ -197,7 +196,7 @@ def _quant_report(e: Dict) -> str:
         "</div>")
 
 
-def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
+def render_html(entries: List[Dict], title: str = "Terrenos") -> str:
     """Self-contained HTML showing the pipeline behind every map."""
     heading = escape(title)
     parts = []
@@ -305,7 +304,7 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
             f"{' \u00b7 '.join(bases)}{' \u00b7 '.join(relays)}<br>{poi_list}</span>"
             "</div>")
         parts.append(_quant_report(e))
-        
+
 
     parts.append("<script>")
     parts.append("const D=" + json.dumps({"entries": entries}) + ";")
