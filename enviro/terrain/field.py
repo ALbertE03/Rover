@@ -21,6 +21,32 @@ class NoisePipeline(TypedDict):
     n_blobs: int
 
 
+def _biased_bands(bands: List[Tuple[float, str]],
+                  dominant: str) -> List[Tuple[float, str]]:
+    """Widen the dominant terrain's band so it clusters in its biome.
+
+    Doubles the dominant band's width by stealing half from each neighbor.
+    """
+    widths = []
+    prev = 0.0
+    for edge, _ in bands:
+        widths.append(edge - prev)
+        prev = edge
+    idx = next(i for i, (_, name) in enumerate(bands) if name == dominant)
+    # steal 40% from each neighbor
+    for j in (idx - 1, idx + 1):
+        if 0 <= j < len(widths):
+            take = widths[j] * 0.4
+            widths[j] -= take
+            widths[idx] += take
+    out, edge = [], 0.0
+    for w, (_, name) in zip(widths, bands):
+        edge += w
+        out.append((edge, name))
+    out[-1] = (1.0, out[-1][1])
+    return out
+
+
 class TerrainField:
     """Terrain as a function of position.
 
@@ -64,6 +90,19 @@ class TerrainField:
             key=lambda pair: pair[0],
         )
         self.height_contrast = float(settings.get("height_contrast", 3.0))
+        # Biomes: K Voronoi regions, each with bands biased toward a dominant
+        # terrain so types cluster into regions instead of scattering.
+        self.biome_count = int(settings.get("biome_count", 0))
+        self.biome_centers: List[Tuple[float, float]] = []
+        self.biome_bands: List[List[Tuple[float, str]]] = []
+        if self.biome_count > 1:
+            rng = random.Random(settings.get("seed", 0) ^ 0xB10E)
+            names = [name for _, name in self.bands]
+            for _ in range(self.biome_count):
+                self.biome_centers.append(
+                    (rng.uniform(0, self.width), rng.uniform(0, self.height)))
+                dominant = rng.choice(names)
+                self.biome_bands.append(_biased_bands(self.bands, dominant))
         self._validate()
 
     def _validate(self) -> None:
@@ -253,12 +292,27 @@ class TerrainField:
                 raw[x][y] = max(0, min(self.depth - 1, h))
         return raw
 
+    def biome_at(self, x: int, y: int) -> int:
+        """Voronoi biome index for a column, or -1 when biomes are off."""
+        if not self.biome_centers:
+            return -1
+        best, best_d = 0, float("inf")
+        for i, (cx, cy) in enumerate(self.biome_centers):
+            d = (x - cx) ** 2 + (y - cy) ** 2
+            if d < best_d:
+                best, best_d = i, d
+        return best
+
     def terrain_at(self, x: int, y: int, z: int) -> str:
         value = self.value(x + self.origin[0], y + self.origin[1], z)
-        for edge, name in self.bands:
+        bands = self.bands
+        b = self.biome_at(x, y)
+        if b >= 0:
+            bands = self.biome_bands[b]
+        for edge, name in bands:
             if value < edge:
                 return name
-        return self.bands[-1][1]
+        return bands[-1][1]
 
     def layer_profile(self, z: int) -> Dict[str, int]:
         counts: Dict[str, int] = {}

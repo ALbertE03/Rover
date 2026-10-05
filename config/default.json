@@ -25,7 +25,13 @@
     "depth_slope": 0.2,
     "noise_octaves": 3,
     "noise_scale": 2,
-    "height_contrast": 3.0
+    "height_contrast": 3.0,
+    "biome_count": 3,
+    "lava_pools": 2,
+    "lava_pool_radius": [
+      2,
+      4
+    ]
   },
   "map": {
     "block_rate": 0.06,
@@ -85,6 +91,12 @@
       "cost": 1.5,
       "glyph": ":",
       "visibility": 0.75
+    },
+    "lava": {
+      "cost": 999.0,
+      "glyph": "~",
+      "visibility": 0.1,
+      "color": "#e03c00"
     }
   }
 }

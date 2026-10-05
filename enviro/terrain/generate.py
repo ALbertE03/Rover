@@ -121,6 +121,7 @@ class MapGenerator:
         self.field = self._build_field()
         cells = self._place_terrain()
         self._place_boulders(cells)
+        self._place_lava_pools(cells)
         stations = self._place_stations(cells)
         pois = self._place_pois(cells)
         return Map(self.map_params, cells, stations, pois)
@@ -166,12 +167,14 @@ class MapGenerator:
             self.rng.uniform(0.0, self.params.width),
             self.rng.uniform(0.0, self.params.height),
         )
+        settings = dict(self.config["generation"])
+        settings["seed"] = self.params.seed
         return TerrainField(
             self.params.width,
             self.params.height,
             self.params.depth,
             origin=origin,
-            settings=self.config["generation"],
+            settings=settings,
         )
 
     def _map_params(self) -> MapParams:
@@ -242,6 +245,26 @@ class MapGenerator:
                 continue
             if not cell.blocked:
                 cell.blocked = self.rng.random() < self.params.block_rate
+
+    def _place_lava_pools(self, cells: Dict[str, Cell]) -> None:
+        """Flood circular pools with impassable lava.
+
+        Pools are blobs on the surface; every lava cell is blocked so the
+        rover can never step in. Runs after boulders so lava overwrites.
+        """
+        n_pools = int(self.config["generation"].get("lava_pools", 0))
+        rmin, rmax = self.config["generation"].get("lava_pool_radius", [2, 4])
+        for _ in range(n_pools):
+            cx = self.rng.uniform(0, self.params.width)
+            cy = self.rng.uniform(0, self.params.height)
+            r = self.rng.uniform(rmin, rmax)
+            for cell in cells.values():
+                x, y, z = cell.pos
+                if not self.field.is_surface(x, y, z):
+                    continue
+                if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
+                    cell.true_terrain = "lava"
+                    cell.blocked = True
 
     def _place_stations(self, cells: Dict[str, Cell]) -> Tuple[Station, ...]:
         """Place stations on the surface, as far apart as the map allows."""
