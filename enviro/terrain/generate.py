@@ -28,8 +28,9 @@ class InstanceParams:
         depth: Vertical layers.
         block_rate: Probability of a boulder per cell, in [0, 1].
         poi_count: Number of points of interest.
-        station_count: Stations to place, 1 or 2. Two is the interesting case,
-            because a weak relay covers only part of what the base covers.
+        station_count: Stations to place (>= 1). They spread by farthest-point
+            fill: first random, each next as far as possible from the placed
+            ones, so extra bases actually cover new ground.
         seed: Seed for the whole instance. None means an unseeded map.
         config_path: Alternate configuration file.
     """
@@ -53,10 +54,9 @@ class InstanceParams:
             raise ValueError(f"depth must be >= 0, got {self.depth}")
         if self.poi_count < 0:
             raise ValueError(f"poi_count must be >= 0, got {self.poi_count}")
-        if self.station_count not in (1, 2):
+        if self.station_count < 1:
             raise ValueError(
-                f"station_count must be 1 or 2, got {self.station_count}. Three "
-                f"stations is a different problem, not a different instance."
+                f"station_count must be >= 1, got {self.station_count}."
             )
         if self.seed is not None and not isinstance(self.seed, int):
             raise ValueError(f"seed must be an int or None, got {type(self.seed).__name__}")
@@ -252,10 +252,33 @@ class MapGenerator:
                 "every surface cell is blocked; lower block_rate or enlarge the map"
             )
 
-        centers = [self.rng.choice(candidates).pos]
-        if len(presets) > 1:
-            farthest = max(candidates, key=lambda c: (distance(c.pos, centers[0]), c.id))
-            centers.append(farthest.pos)
+        grid = self.config.get("network", {}).get("grid")
+        if grid:
+            # Malla: puntos evenly spaced, cada uno anclado a la celda
+            # transitable más cercana. Para baterías chicas: la malla
+            # garantiza saltos cortos entre bases vecinas.
+            nx, ny = int(grid[0]), int(grid[1])
+            if nx < 1 or ny < 1 or nx * ny < len(presets):
+                raise ValueError(
+                    f"network.grid {grid} must cover {len(presets)} stations."
+                )
+            centers = []
+            for i in range(nx):
+                for j in range(ny):
+                    gx = (i + 0.5) * self.params.width / nx
+                    gy = (j + 0.5) * self.params.height / ny
+                    best = min(candidates,
+                               key=lambda c: (distance(c.pos, (gx, gy, 0)), c.id))
+                    centers.append(best.pos)
+            centers = centers[: len(presets)]
+        else:
+            centers = [self.rng.choice(candidates).pos]
+            while len(centers) < len(presets):
+                farthest = max(
+                    candidates,
+                    key=lambda c: (min(distance(c.pos, p) for p in centers), c.id),
+                )
+                centers.append(farthest.pos)
 
         return place_stations(presets, tuple(centers), self.map_params.diagonal)
 

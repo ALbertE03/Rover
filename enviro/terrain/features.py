@@ -18,7 +18,8 @@ class Station:
     Attributes:
         id: Station name.
         center: Antenna position.
-        radius: Nominal range in grid units.
+        radius: Nominal range in grid units. 0 means a point station: the
+            rover must stand on its cell to link.
         signal: Link quality in (0, 1].
     """
     id: str

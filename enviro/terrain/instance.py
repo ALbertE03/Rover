@@ -85,8 +85,9 @@ class MapParams:
         if not self.stations:
             raise ValueError("at least one station is required")
         for name, radius, signal in self.stations:
-            if radius <= 0:
-                raise ValueError(f"station '{name}': radius must be > 0, got {radius}")
+            if radius < 0:
+                raise ValueError(f"station '{name}': radius must be >= 0, got {radius}")
+            # radius 0 = point station: the rover must stand on its cell.
             if not 0.0 < signal <= 1.0:
                 raise ValueError(f"station '{name}': signal must be in (0, 1], got {signal}")
         if self.battery <= 0:
