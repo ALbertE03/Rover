@@ -256,7 +256,7 @@ def _quant_report(e: Dict) -> str:
         "</div>")
 
 
-def _png_b64(img) -> str:
+def _png_b64(img: "Image.Image") -> str:
     """PIL image -> base64 data URI."""
     import base64
     import io
@@ -294,7 +294,7 @@ def _hex(h: str) -> tuple:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-def _map_png(e: Dict, kind: str, scale: int = 10):
+def _map_png(e: Dict, kind: str, scale: int = 10) -> "Image.Image":
     """Render one map panel as a PIL image. No JavaScript needed."""
     from PIL import Image, ImageDraw
     W, H = e["W"], e["H"]
@@ -572,7 +572,8 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
                         if e["pois"] else 0)
         hdist = ", ".join(f"z{z}:{c}" for z, c in enumerate(e["layer_hist"]))
 
-        def _row(emoji, label, val_txt, frac_val, frac_max, col):
+        def _row(emoji: str, label: str, val_txt: str,
+                 frac_val: float, frac_max: float, col: str) -> str:
             bar = _bar_png(frac_val, frac_max, color=_BCOL[col])
             return (f"<div class='stat-row'><span>{emoji} {label}: "
                     f"<b>{val_txt}</b></span>"

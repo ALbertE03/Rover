@@ -1,7 +1,7 @@
 import random
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from ..config import load_config,get
 from .catalogue import terrain, terrain_names
 from .features import Poi, Station, place_stations
@@ -62,7 +62,7 @@ class InstanceParams:
             raise ValueError(f"seed must be an int or None, got {type(self.seed).__name__}")
 
     @classmethod
-    def from_config(cls, path: Optional[Path] = None, **overrides) -> "InstanceParams":
+    def from_config(cls, path: Optional[Path] = None, **overrides: Any) -> "InstanceParams":
         """Take the instance fields from a JSON file, then apply overrides.
 
         Args:
@@ -126,19 +126,19 @@ class MapGenerator:
         pois = self._place_pois(cells)
         return Map(self.map_params, cells, stations, pois)
 
-    def create_from_seed(self, seed: int, **overrides) -> Map:
+    def create_from_seed(self, seed: int, **overrides: Any) -> Map:
         """Generate a map for one seed.
 
         Args:
             seed: Seed to use.
-            **overrides: Parameter overrides for this call only.
+            **overrides: Any: Parameter overrides for this call only.
 
         Returns:
             A generated map.
         """
         return MapGenerator(replace(self.params, seed=seed, **overrides)).create()
 
-    def batch(self, seeds: Iterable[int], **overrides) -> List[Map]:
+    def batch(self, seeds: Iterable[int], **overrides: Any) -> List[Map]:
         """Generate one map per seed.
 
         This is what a comparison over instances consumes: a family drawn from
@@ -146,7 +146,7 @@ class MapGenerator:
 
         Args:
             seeds: Seeds to draw.
-            **overrides: Parameter overrides applied to every map.
+            **overrides: Any: Parameter overrides applied to every map.
 
         Returns:
             One map per seed, in order.
@@ -498,7 +498,7 @@ class MapGenerator:
         return f"MapGenerator(seed={self.params.seed})"
 
 
-def generate(seed: int, **overrides) -> Map:
+def generate(seed: int, **overrides: Any) -> Map:
     """Generate one map for a seed.
 
     Example:
