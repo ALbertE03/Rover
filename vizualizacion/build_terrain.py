@@ -393,56 +393,72 @@ def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>""" + heading + """</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:1060px;margin:0 auto;padding:14px;background:#0f1419;color:#e6e9ee}
-h1{font-size:19px}h2{font-size:16px;margin:26px 0 8px;color:#9fd0ff}
-.grid{display:flex;gap:12px;flex-wrap:wrap}
-.panel{background:#1a2230;border-radius:10px;padding:10px;margin-bottom:12px}
-.panel h3{margin:4px 0 8px;font-size:12px;color:#cfe3ff}
-.note{background:#1a2230;border-left:4px solid #e2a63d;border-radius:6px;padding:10px 14px;margin:12px 0;font-size:13px;line-height:1.6}
-img.viz{border-radius:8px;background:#0a0d12;max-width:100%;image-rendering:pixelated}
-code{background:#0a0d12;padding:1px 6px;border-radius:4px;font-size:12px}
-.legend{font-size:12px;color:#9aa3b2;margin-top:6px;line-height:1.9}
-ol.steps{margin:8px 0;padding-left:22px}
-ol.steps li{margin:5px 0}
-table.kv{border-collapse:collapse;margin:10px 0;font-size:12px;width:100%}
-table.kv th{text-align:left;color:#9fd0ff;font-weight:600;padding:4px 8px;border-bottom:1px solid #2b3a55}
-table.kv td{padding:4px 8px;border-top:1px solid #233047;vertical-align:top}
-table.kv td:first-child{color:#9aa3b2}
-td.num{text-align:right;white-space:nowrap;color:#9aa3b2}
+/* Minimalist dark */
+:root{--bg:#111418;--fg:#dfe3e8;--muted:#8a919c;--line:#242b34;--accent:#7aa2f7}
+body{font-family:system-ui,-apple-system,sans-serif;max-width:1000px;margin:0 auto;
+  padding:24px 20px;background:var(--bg);color:var(--fg);line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+h1{font-size:22px;font-weight:600;letter-spacing:-.02em;margin:0 0 4px}
+h2{font-size:15px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted);margin:32px 0 12px}
+h3{font-size:13px;font-weight:600;margin:0 0 10px;color:var(--fg)}
+.grid{display:flex;gap:16px;flex-wrap:wrap}
+.panel{border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.panel h3{margin:0 0 12px}
+.note{border-left:2px solid var(--line);padding:4px 0 4px 16px;margin:16px 0;
+  font-size:13.5px;line-height:1.7;color:var(--muted)}
+.note b{color:var(--fg);font-weight:600}
+img.viz{border-radius:8px;max-width:100%;image-rendering:pixelated;display:block}
+code{font-size:12px;color:var(--muted)}
+.legend{font-size:12px;color:var(--muted);margin-top:10px;line-height:2}
+ol.steps{margin:8px 0;padding-left:20px;font-size:13.5px}
+ol.steps li{margin:6px 0}
+table.kv{border-collapse:collapse;margin:12px 0;font-size:12.5px;width:100%}
+table.kv th{text-align:left;color:var(--muted);font-weight:600;padding:6px 10px;
+  border-bottom:1px solid var(--line);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+table.kv td{padding:6px 10px;border-top:1px solid var(--line);vertical-align:top}
+td.num{text-align:right;white-space:nowrap;color:var(--muted)}
 td.bar{width:26%}
-td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
+td.bar span{display:block;height:8px;border-radius:4px;min-width:1px}
 .m{display:inline-block;min-width:1em;text-align:center;font-family:ui-monospace,monospace;
-   font-weight:700;background:#0a0d12;border-radius:3px;padding:0 3px;margin-right:2px}
+  font-weight:700;border-radius:3px;padding:0 3px;margin-right:2px}
 .mB{color:#7ef0a0}.mR{color:#ffa94d}.mO{color:#c792ea}.mA{color:#ff8787}
-.dim{color:#79839a;font-size:11px}
-.feat{margin-top:8px;line-height:2}
-/* CSS-only tabs: inputs, .tabs and .tabsec are all siblings */
+.dim{color:var(--muted);font-size:11.5px}
+.feat{margin-top:10px;line-height:2.1}
+/* Minimal tabs: text + underline */
 .tabinput{display:none}
-.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
-.tabs label{background:#2b3a55;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer}
-.tabs label:hover{background:#3a4d73}
+.tabs{display:flex;gap:4px;margin:20px 0 8px;border-bottom:1px solid var(--line)}
+.tabs label{padding:10px 16px;font-size:14px;color:var(--muted);cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s}
+.tabs label:hover{color:var(--fg)}
 """ + "\n".join(
         f'#t-{e["seed"]}:checked~.tabs label[for="t-{e["seed"]}"],'
         for e in entries) + """
-#t-cmp:checked~.tabs label[for="t-cmp"]{background:#4c6ef5}
+#t-cmp:checked~.tabs label[for="t-cmp"]{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
 .tabsec{display:none}
 #t-cmp:checked~#sec-cmp{display:block}
 """ + "\n".join(
         f"#t-{e['seed']}:checked~#sec-{e['seed']}{{display:block}}"
         for e in entries) + """
-.cmp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start}
-.cmp-card .stats{font-size:12px;margin-top:8px;line-height:1.7;overflow-wrap:break-word;word-break:break-word}
+.cmp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:start}
+.cmp-card .stats{font-size:12.5px;margin-top:14px;line-height:1.6}
+.stat-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:4px 0;border-bottom:1px solid var(--line)}
+.stat-row:last-child{border-bottom:0}
+.pxbar{height:12px;border-radius:6px;image-rendering:pixelated;flex-shrink:0;opacity:.9}
+.legend-box{border-left-color:var(--accent)}
+.leg-item{display:inline-block;margin:0 16px 4px 0;white-space:nowrap;font-size:13px}
+.swatch{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;
+  vertical-align:-1px}
 .panel,.note,.stats,.legend{overflow-wrap:break-word;word-break:break-word}
-.legend-box{line-height:2.2}
-.leg-item{display:inline-block;margin-right:14px;white-space:nowrap}
-.swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:5px;vertical-align:-2px;border:1px solid rgba(255,255,255,.25)}
-.stat-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0}
-.pxbar{height:14px;border-radius:3px;image-rendering:pixelated;flex-shrink:0}
 @media(max-width:600px){
-  body{padding:10px}
-  .tabs label{padding:8px 14px;font-size:13px}
+  body{padding:16px 12px}
+  h1{font-size:19px}
+  .tabs{overflow-x:auto}
+  .tabs label{padding:8px 12px;font-size:13px;white-space:nowrap}
   .grid{flex-direction:column}
-  .panel{width:100%;box-sizing:border-box}
+  .panel{width:100%;box-sizing:border-box;padding:12px}
+  .cmp-grid{grid-template-columns:1fr}
 }
 </style></head><body>
 <h1>""" + heading + f"""</h1>
