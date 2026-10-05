@@ -1,3 +1,4 @@
+import math
 import random
 from typing import Dict, List, Optional, Tuple
 from ..config import get
@@ -33,11 +34,6 @@ class TerrainField:
         self.octaves = 1
         self.weights = {"x": 0.5, "y": 0.5}
         self.bands: List[Tuple[float, str]] = []
-        self.height_scale = 2
-        self.height_octaves = 1
-        self.height_smooth_passes = 2
-        self.height_subhill_rate = 0.08
-        self.height_peak_keep_rate = 0.3
         self.height_contrast = 2.0
         self._heightmap: Optional[List[List[int]]] = None
         self._configure(settings if settings is not None else get("generation"))
@@ -51,11 +47,6 @@ class TerrainField:
             [(float(b["max"]), str(b["terrain"])) for b in settings.get("bands", [])],
             key=lambda pair: pair[0],
         )
-        self.height_scale = settings.get("height_scale", 2)
-        self.height_octaves = settings.get("height_octaves", 1)
-        self.height_smooth_passes = settings.get("height_smooth_passes", 2)
-        self.height_subhill_rate = float(settings.get("height_subhill_rate", 0.08))
-        self.height_peak_keep_rate = float(settings.get("height_peak_keep_rate", 0.3))
         self.height_contrast = float(settings.get("height_contrast", 2.0))
         self._validate()
 
@@ -80,29 +71,6 @@ class TerrainField:
             raise ValueError(f"generation.axis_weights must sum to 1; got {total}")
         if not 0.0 <= self.depth_slope <= 1.0:
             raise ValueError(f"generation.depth_slope must be in [0, 1], got {self.depth_slope}")
-        if (not isinstance(self.height_scale, int) or isinstance(self.height_scale, bool)
-                or self.height_scale < 1 or self.height_scale % 2):
-            raise ValueError(
-                f"generation.height_scale must be a positive even integer, got {self.height_scale!r}."
-            )
-        if (not isinstance(self.height_octaves, int) or isinstance(self.height_octaves, bool)
-                or not 1 <= self.height_octaves <= 6):
-            raise ValueError(
-                f"generation.height_octaves must be an integer in [1, 6], got {self.height_octaves!r}"
-            )
-        if (not isinstance(self.height_smooth_passes, int) or isinstance(self.height_smooth_passes, bool)
-                or not 0 <= self.height_smooth_passes <= 5):
-            raise ValueError(
-                f"generation.height_smooth_passes must be an integer in [0, 5], got {self.height_smooth_passes!r}"
-            )
-        if not 0.0 <= self.height_subhill_rate <= 1.0:
-            raise ValueError(
-                f"generation.height_subhill_rate must be in [0, 1], got {self.height_subhill_rate!r}"
-            )
-        if not 0.0 <= self.height_peak_keep_rate <= 1.0:
-            raise ValueError(
-                f"generation.height_peak_keep_rate must be in [0, 1], got {self.height_peak_keep_rate!r}"
-            )
         if not self.height_contrast > 0.0:
             raise ValueError(
                 f"generation.height_contrast must be > 0, got {self.height_contrast!r}"
@@ -134,20 +102,63 @@ class TerrainField:
             frequency *= 2
         return (total / norm) if norm else 0.0
 
-    def _height_noise(self, x: float, y: float) -> float:
-        total = 0.0
-        norm = 0.0
-        amplitude = 1.0
-        frequency = self.height_scale
-        for _ in range(self.height_octaves):
-            total += amplitude * (
-                0.5 * _wave(x * frequency, self.width)
-                + 0.5 * _wave(y * frequency, self.height)
-            )
-            norm += amplitude
-            amplitude *= 0.5
-            frequency *= 2
-        return (total / norm) if norm else 0.5
+    def _noise_seed(self) -> int:
+        """Seed entera determinista derivada del origin (o sea, de la seed)."""
+        return int(self.origin[0] * 1000 + self.origin[1] * 1000
+                   + self.width * 131 + self.height * 17)
+
+    def _draw_noise_params(self, rng: random.Random):
+        """Sortea los parámetros de los 3 ruidos. Todo sale de la seed."""
+        # 1. ESTRELLA: brazos radiales desde un centro aleatorio.
+        star = {
+            "cx": rng.uniform(0, self.width),
+            "cy": rng.uniform(0, self.height),
+            "arms": rng.randint(3, 5),
+            "phase": rng.uniform(0, 2 * math.pi),
+            "radial": rng.uniform(0.10, 0.30),
+        }
+        # 2. MANCHAS: gaussianas con centro y sigma aleatorios.
+        blobs = [
+            (rng.uniform(0, self.width),
+             rng.uniform(0, self.height),
+             rng.uniform(2.0, 6.0))
+            for _ in range(rng.randint(8, 14))
+        ]
+        # 3. ONDAS: senos direccionales con ángulo/frecuencia/fase aleatorios.
+        waves = [
+            (rng.uniform(0, math.pi),
+             rng.uniform(0.08, 0.28),
+             rng.uniform(0, 2 * math.pi))
+            for _ in range(3)
+        ]
+        return star, blobs, waves
+
+    def _star_value(self, x: float, y: float, p) -> float:
+        dx, dy = x - p["cx"], y - p["cy"]
+        r = math.hypot(dx, dy)
+        theta = math.atan2(dy, dx)
+        return 0.5 + 0.5 * math.cos(p["arms"] * theta + p["phase"]) * math.cos(r * p["radial"])
+
+    def _blobs_value(self, x: float, y: float, blobs) -> float:
+        return sum(
+            math.exp(-((x - bx) ** 2 + (y - by) ** 2) / (2 * sig ** 2))
+            for bx, by, sig in blobs
+        )
+
+    def _waves_value(self, x: float, y: float, waves) -> float:
+        return sum(
+            0.5 + 0.5 * math.sin(
+                2 * math.pi * (x * math.cos(a) + y * math.sin(a)) * f + ph)
+            for a, f, ph in waves
+        ) / len(waves)
+
+    @staticmethod
+    def _normalize(field: List[List[float]]) -> List[List[float]]:
+        lo = min(min(row) for row in field)
+        hi = max(max(row) for row in field)
+        if hi - lo < 1e-9:
+            return [[0.5 for _ in row] for row in field]
+        return [[(v - lo) / (hi - lo) for v in row] for row in field]
 
     def height_at(self, x: int, y: int) -> int:
         if self.depth <= 1:
@@ -170,79 +181,33 @@ class TerrainField:
         return z < self.height_at(x, y)
 
     def _build_heightmap(self) -> List[List[int]]:
+        """Estrella + manchas + ondas -> promedio -> contraste -> cuantización.
+
+        Sin pasadas de mediana, sin recorte de picos y sin sublomas: lo que
+        sale de los 3 ruidos es el terreno final.
+        """
+        rng = random.Random(self._noise_seed())
+        star_p, blobs_p, waves_p = self._draw_noise_params(rng)
+        f_star = [[self._star_value(x, y, star_p)
+                   for y in range(self.height)] for x in range(self.width)]
+        f_blobs = [[self._blobs_value(x, y, blobs_p)
+                    for y in range(self.height)] for x in range(self.width)]
+        f_waves = [[self._waves_value(x, y, waves_p)
+                    for y in range(self.height)] for x in range(self.width)]
+        f_star = self._normalize(f_star)
+        f_blobs = self._normalize(f_blobs)
+        f_waves = self._normalize(f_waves)
         raw: List[List[int]] = [[0 for _ in range(self.height)] for _ in range(self.width)]
         for x in range(self.width):
             for y in range(self.height):
-                n = self._height_noise(x + self.origin[0], y + self.origin[1])
-                # Contraste: estira el ruido alrededor de 0.5 para que el mapa
-                # use todo el rango [0, depth-1] en vez de amontonarse en el medio.
-                # 1.0 = sin cambios; más alto = más llanuras bajas y más cimas altas.
+                n = (f_star[x][y] + f_blobs[x][y] + f_waves[x][y]) / 3.0
+                # Contraste: estira el promedio alrededor de 0.5 para que el
+                # mapa use todo el rango [0, depth-1].
                 n = 0.5 + (n - 0.5) * self.height_contrast
                 n = max(0.0, min(1.0, n))
                 h = int(n * (self.depth - 1) + 0.5)
                 raw[x][y] = max(0, min(self.depth - 1, h))
-        for _ in range(self.height_smooth_passes):
-            raw = self._median_smooth(raw)
-        # Quita picos aislados pero no todos: keeps peak_keep_rate de ellos.
-        # Determinista por semilla (via origin) para que el mapa sea reproducible.
-        rng = random.Random(int(self.origin[0] * 1000 + self.origin[1] * 1000 + self.width * 131 + self.height * 17))
-        for _ in range(3):
-            nxt = [row[:] for row in raw]
-            changed = False
-            for x in range(self.width):
-                for y in range(self.height):
-                    h = raw[x][y]
-                    if h == 0:
-                        continue
-                    neigh = []
-                    for dx in (-1, 0, 1):
-                        for dy in (-1, 0, 1):
-                            if dx == 0 and dy == 0:
-                                continue
-                            nx, ny = x + dx, y + dy
-                            if 0 <= nx < self.width and 0 <= ny < self.height:
-                                neigh.append(raw[nx][ny])
-                    if neigh and h > max(neigh):
-                        # pico de 1 celda: lo conservamos con prob. keep_rate
-                        if rng.random() < self.height_peak_keep_rate:
-                            continue
-                        nxt[x][y] = max(neigh)
-                        changed = True
-            raw = nxt
-            if not changed:
-                break
-        # Sublomitas: encima de una loma puede haber otra lomita.
-        # Con prob. subhill_rate, levanta un bloque 2x2 en +1 (sin pasar depth-1).
-        # Solo sobre lomas existentes (h>0) para que sea "encima de la loma".
-        if self.height_subhill_rate > 0 and self.depth > 1:
-            for x in range(self.width - 1):
-                for y in range(self.height - 1):
-                    if rng.random() >= self.height_subhill_rate:
-                        continue
-                    base = min(raw[x][y], raw[x + 1][y], raw[x][y + 1], raw[x + 1][y + 1])
-                    if base <= 0 or base >= self.depth - 1:
-                        continue
-                    # que sea meseta: las 4 celdas a la misma altura
-                    if not (raw[x][y] == raw[x + 1][y] == raw[x][y + 1] == raw[x + 1][y + 1]):
-                        continue
-                    for dx in (0, 1):
-                        for dy in (0, 1):
-                            raw[x + dx][y + dy] = min(self.depth - 1, base + 1)
         return raw
-
-    def _median_smooth(self, hm: List[List[int]]) -> List[List[int]]:
-        out: List[List[int]] = [[0 for _ in range(self.height)] for _ in range(self.width)]
-        for x in range(self.width):
-            for y in range(self.height):
-                vals = []
-                for dx in (-1, 0, 1):
-                    for dy in (-1, 0, 1):
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < self.width and 0 <= ny < self.height:
-                            vals.append(hm[nx][ny])
-                vals.sort()
-                out[x][y] = vals[len(vals) // 2]
-        return out
 
     def terrain_at(self, x: int, y: int, z: int) -> str:
         value = self.value(x + self.origin[0], y + self.origin[1], z)
@@ -272,7 +237,7 @@ class TerrainField:
         return (f"TerrainField({self.width}x{self.height}x{self.depth}, "
                 f"scale={self.scale}, octaves={self.octaves}, "
                 f"slope={self.depth_slope}, bands={len(self.bands)}, "
-                f"h_scale={self.height_scale}, h_oct={self.height_octaves})")
+                f"h_contrast={self.height_contrast})")
 
 
 def _wave(position: float, extent: int) -> float:
