@@ -174,6 +174,31 @@ class TerrainField:
             self._heightmap = self._build_heightmap()
         return [row[:] for row in self._heightmap]
 
+    def noise_pipeline(self) -> Dict[str, object]:
+        """Los 3 ruidos del heightmap, normalizados, más su promedio.
+
+        Para visualización: muestra de qué está hecho el terreno antes de
+        la cuantización. Determinista para la misma seed.
+        """
+        rng = random.Random(self._noise_seed())
+        star_p, blobs_p, waves_p = self._draw_noise_params(rng)
+        w, h = self.width, self.height
+        fs = [[self._star_value(x, y, star_p) for y in range(h)] for x in range(w)]
+        fb = [[self._blobs_value(x, y, blobs_p) for y in range(h)] for x in range(w)]
+        fw = [[self._waves_value(x, y, waves_p) for y in range(h)] for x in range(w)]
+        ns, nb, nw = self._normalize(fs), self._normalize(fb), self._normalize(fw)
+        combined = [[(ns[x][y] + nb[x][y] + nw[x][y]) / 3.0
+                     for y in range(h)] for x in range(w)]
+        return {
+            "star": ns,
+            "blobs": nb,
+            "waves": nw,
+            "combined": combined,
+            "star_arms": star_p["arms"],
+            "star_center": (round(star_p["cx"], 1), round(star_p["cy"], 1)),
+            "n_blobs": len(blobs_p),
+        }
+
     def is_surface(self, x: int, y: int, z: int) -> bool:
         return z == self.height_at(x, y)
 
