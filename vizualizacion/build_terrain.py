@@ -192,12 +192,6 @@ def _quant_report(e: Dict) -> str:
         "<th class='num'>celdas</th><th class='num'>parte</th></tr>"
         + "".join(rows) +
         "</table>"
-        "<span class='cap'>Los intervalos van centrados en los enteros, no alineados "
-        "con ellos, as&iacute; que un valor justo en un l&iacute;mite sube: "
-        f"<code>int(n*{span}+0.5)</code> manda n=0.5/{span} a z=1, no a z=0. "
-        "Cuantizar es una correspondencia de varios a uno, o sea un promedio con "
-        "p&eacute;rdida dentro de cada intervalo &mdash; diga lo que diga el docstring "
-        "del heightmap sobre no suavizar.</span>"
         "</div>")
 
 
