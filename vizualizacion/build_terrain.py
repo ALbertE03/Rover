@@ -502,6 +502,40 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
     parts.append('<div class="tabsec" id="sec-cmp">')
     parts.append("<h2>Comparaci\u00f3n de terrenos</h2>")
 
+    # Full pipeline explanation (steps 1-8)
+    parts.append("""<div class="note">
+<b>C\u00f3mo se genera cada mapa, paso a paso:</b>
+<ol class="steps">
+<li><b>Estrella:</b> ruido radial con 3–5 brazos desde un centro aleatorio.
+    Crea la estructura base del relieve.</li>
+<li><b>Manchas:</b> 8–14 manchas gaussianas en posiciones aleatorias.
+    Aportan variaciones locales suaves.</li>
+<li><b>Ondas:</b> 3 ondas sinusoidales direccionales.
+    A\u00f1aden ritmo y direcci\u00f3n al terreno.</li>
+<li><b>Promedio:</b> se promedian los 3 ruidos normalizados
+    <code>n = (estrella + manchas + ondas) / 3</code>.
+    El resultado est\u00e1 en [0,1].</li>
+<li><b>Contraste:</b> se estira alrededor del punto medio
+    <code>n = 0.5 + (n - 0.5) \u00d7 height_contrast</code>
+    y se recorta a [0,1]. Esto exagera las diferencias:
+    lo alto se vuelve m\u00e1s alto, lo bajo m\u00e1s bajo.</li>
+<li><b>Cuantizaci\u00f3n \u2192 altura:</b> cada valor se redondea a la capa
+    m\u00e1s cercana <code>h = int(n \u00d7 (depth-1) + 0.5)</code>.
+    As\u00ed nacen los niveles z=0, 1, 2... que el rover puede escalar
+    (m\u00e1ximo 1 nivel por paso).</li>
+<li><b>Biomas:</b> el mapa se divide en 3 regiones Voronoi
+    (cada casilla pertenece a su centro m\u00e1s cercano).
+    Cada bioma saca un terreno dominante al azar y se ensancha su banda
+    de ruido, as\u00ed los terrenos se agrupan en zonas en vez de salir
+    salpicados.</li>
+<li><b>Terrenos + rocas + lava:</b> con las bandas sesgadas de su bioma,
+    cada casilla obtiene su terreno (llanos/arena/roca/grieta).
+    Luego se colocan rocas \u25b2 al azar (6% de casillas, bloquean el paso)
+    y 2 charcos de lava (c\u00edrculos que queman el terreno a lava y lo
+    bloquean). Encima van las bases B/R y los POIs O.</li>
+</ol>
+</div>""")
+
     # Dynamic legend: color per terrain type, from the catalogue.
     cat = entries[0]["terrain_catalogue"]
     leg_items = " ".join(
