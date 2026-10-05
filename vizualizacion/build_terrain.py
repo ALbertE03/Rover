@@ -105,6 +105,29 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
             "rgb": rgb,
         })
 
+    # ---- Extended statistics ----
+    import math
+    n = width * height
+    flat_h = [z for row in hm for z in row]
+    h_mean = sum(flat_h) / n
+    h_var = sum((z - h_mean) ** 2 for z in flat_h) / n
+    # roughness: mean |dz| between 4-neighbors
+    diffs = []
+    for x in range(width):
+        for y in range(height):
+            if x + 1 < width:
+                diffs.append(abs(hm[x][y] - hm[x + 1][y]))
+            if y + 1 < height:
+                diffs.append(abs(hm[x][y] - hm[x][y + 1]))
+    roughness = sum(diffs) / len(diffs) if diffs else 0.0
+    # terrain diversity (Shannon entropy, bits)
+    entropy = -sum((c / n) * math.log2(c / n)
+                   for c in mix.values() if c > 0)
+    most = max(mix.items(), key=lambda kv: kv[1]) if mix else ("?", 0)
+    least = min(mix.items(), key=lambda kv: kv[1]) if mix else ("?", 0)
+    total_science = sum(p["interest"] for p in pois)
+    boulder_set = {tuple(b) for b in boulders}
+
     return {
         "seed": seed, "W": width, "H": height, "depth": depth,
         "noise": nz,
@@ -117,6 +140,21 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
         "height_colors": _height_colors(depth),
         "stations": stations,
         "pois": pois,
+        # statistics
+        "stats": {
+            "h_mean": h_mean,
+            "h_std": math.sqrt(h_var),
+            "h_min": min(flat_h),
+            "h_max": max(flat_h),
+            "roughness": roughness,
+            "entropy": entropy,
+            "most_terrain": most[0],
+            "most_pct": 100 * most[1] / n,
+            "least_terrain": least[0],
+            "least_pct": 100 * least[1] / n,
+            "total_science": total_science,
+            "boulder_pct": 100 * len(boulders) / n,
+        },
         # quantization report
         "contrast": contrast,
         "cells": width * height,
@@ -420,8 +458,7 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
         seed = e["seed"]
         t64 = _png_b64(_map_png(e, "terrain", scale=10))
         n = e["W"] * e["H"]
-        # useful stats
-        boulder_pct = 100 * len(e["boulders"]) / n
+        st = e["stats"]
         avg_cost = sum(t["cost"] * e["terrain_mix"].get(t["name"], 0)
                        for t in e["terrain_catalogue"]) / n
         avg_interest = (sum(p["interest"] for p in e["pois"]) / len(e["pois"])
@@ -431,11 +468,17 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
             f"<div class='panel cmp-card'><h3>Seed {seed}</h3>"
             f"<img class='viz' src='{t64}'>"
             f"<div class='stats'>"
-            f"<div>\U0001f9f1 <b>{len(e['boulders'])}</b> rocas ({boulder_pct:.1f}%) \u00b7 "
-            f"\U0001f4cd <b>{len(e['pois'])}</b> POIs "
-            f"(inter\u00e9s medio {avg_interest:.2f})</div>"
+            f"<div>\U0001f9f1 <b>{len(e['boulders'])}</b> rocas ({st['boulder_pct']:.1f}%)</div>"
+            f"<div>\U0001f4cd <b>{len(e['pois'])}</b> POIs \u2014 "
+            f"inter\u00e9s medio {avg_interest:.2f}, total {st['total_science']:.2f}</div>"
             f"<div>\U0001f4b0 Costo medio de paso: <b>{avg_cost:.2f}</b></div>"
-            f"<div class='dim'>Altura \u2014 {hdist}</div>"
+            f"<div>\U0001f3d4\ufe0f Altura media {st['h_mean']:.2f} "
+            f"(\u00b1{st['h_std']:.2f}), rango z{st['h_min']}\u2013z{st['h_max']}</div>"
+            f"<div>\u3030\ufe0f Rugosidad (desnivel medio): <b>{st['roughness']:.2f}</b></div>"
+            f"<div>\U0001f500 Diversidad de terrenos: {st['entropy']:.2f} bits \u2014 "
+            f"domina {st['most_terrain']} ({st['most_pct']:.0f}%), "
+            f"raro {st['least_terrain']} ({st['least_pct']:.0f}%)</div>"
+            f"<div class='dim'>Distribuci\u00f3n \u2014 {hdist}</div>"
             f"</div></div>")
     parts.append("</div>")
     parts.append('</div>')
