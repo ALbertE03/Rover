@@ -22,8 +22,8 @@ class MapParams:
         climb_penalty: Extra cost per level gained, on top of terrain cost.
         survey_height_bonus: Extra survey radius at max height. At z=0 the
             survey radius is move_radius; at z=depth-1 it is
-            move_radius + survey_height_bonus. A mayor altura, más celdas
-            se descubren al avanzar.
+            move_radius + survey_height_bonus. The higher the ground, the more
+            cells are revealed as the rover advances.
         poi_count: Number of points of interest.
         poi_min_visibility: Visibility the observer's ground needs.
         poi_interest_climb_weight: Weight of height (costly to climb,
@@ -176,18 +176,18 @@ class Map:
     def reachable_from_surface(self) -> set:
         """Cells reachable from any traversable surface cell.
 
-        La superficie ahora es la cima real de cada columna (z == altura),
-        no z=0. Es la referencia de "se puede llegar": los objetivos se
-        colocan dentro de este conjunto.
+        The surface is now the real top of each column (z == height), not z=0.
+        It is the "can be reached" reference: objectives are placed inside this
+        set.
         """
         return self.reachable_from(*self.surface_ids())
 
     def surface_ids(self) -> List[str]:
-        """Ids de celdas transitables en la cima real de cada columna.
+        """Ids of traversable cells on the real top of each column.
 
-        Una celda es superficie si es transitable y no hay ninguna celda
-        (transitable o sólida) por encima en la misma (x, y). El aire no
-        existe como celda, así que basta con mirar z+1.
+        A cell is surface if it is traversable and there is no cell (traversable
+        or solid) above it on the same (x, y). Air does not exist as a cell, so
+        looking at z+1 is enough.
         """
         ids: List[str] = []
         for cell in self.cells.values():
@@ -239,19 +239,20 @@ class Map:
     #  knowledge 
 
     def survey_radius_at(self, cell: Cell) -> float:
-        """Radio de descubrimiento desde una celda.
+        """Discovery radius from a cell.
 
-        Dos factores, ambos sobre el observador:
+        Two factors, both about the observer:
 
-        * **Altura:** en z=0 es move_radius; en la cima (z=depth-1) es
-          move_radius + survey_height_bonus. A mayor altura, más se ve.
-        * **Visibilidad del propio terreno:** el radio se multiplica por la
-          visibilidad del suelo que se pisa (la misma que decide si un POI es
-          legible). En llano despejado se aprovecha todo; en una grieta
-          (crevasse) se ve poco aunque se esté alto: el mejor mirador no sirve
-          si el suelo no deja ver a través.
+        * **Height:** at z=0 it is move_radius; at the top (z=depth-1) it is
+          move_radius + survey_height_bonus. The higher the ground, the further
+          it sees.
+        * **Visibility of the ground itself:** the radius is multiplied by the
+          visibility of the ground being stood on (the same number that decides
+          whether a POI is legible). On open flat ground the whole radius is
+          used; in a crevasse you see little even from up high: the best
+          vantage point is useless if the ground does not let you see through.
 
-        Se usa el terreno real: el observador sabe qué pisa.
+        It uses the true terrain: the observer knows what it is standing on.
         """
         if self.params.depth <= 1:
             base = self.params.move_radius
@@ -261,7 +262,7 @@ class Map:
         return base * terrain(cell.true_terrain).visibility
 
     def _around_survey(self, cell: Cell) -> List[Cell]:
-        """Celdas dentro del radio de descubrimiento (depende de la altura)."""
+        """Cells within the discovery radius (which depends on the height)."""
         radius = self.survey_radius_at(cell)
         offsets = neighbour_offsets(radius)
         x, y, z = cell.pos
@@ -277,9 +278,10 @@ class Map:
     def survey(self, id_: str) -> List[str]:
         """Reveal the terrain around a cell and report what was revealed.
 
-        El radio crece con la altura y con la visibilidad del propio terreno:
-        a mayor altura, más celdas se descubren al avanzar; en terreno despejado
-        se aprovecha todo el radio, en grietas se ve poco aunque se esté alto.
+        The radius grows with the height and with the visibility of the ground
+        itself: the higher the ground, the more cells are revealed as the rover
+        advances; on open ground the whole radius is used, in crevasses you see
+        little even from up high.
 
         Args:
             id_: Cell to observe from. Unknown ids reveal nothing.

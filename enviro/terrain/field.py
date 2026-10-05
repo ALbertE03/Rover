@@ -103,13 +103,13 @@ class TerrainField:
         return (total / norm) if norm else 0.0
 
     def _noise_seed(self) -> int:
-        """Seed entera determinista derivada del origin (o sea, de la seed)."""
+        """Deterministic integer seed derived from the origin (that is, from the seed)."""
         return int(self.origin[0] * 1000 + self.origin[1] * 1000
                    + self.width * 131 + self.height * 17)
 
     def _draw_noise_params(self, rng: random.Random):
-        """Sortea los parámetros de los 3 ruidos. Todo sale de la seed."""
-        # 1. ESTRELLA: brazos radiales desde un centro aleatorio.
+        """Draw the parameters of the 3 noises. Everything comes from the seed."""
+        #  STAR: radial arms from a random center.
         star = {
             "cx": rng.uniform(0, self.width),
             "cy": rng.uniform(0, self.height),
@@ -117,14 +117,14 @@ class TerrainField:
             "phase": rng.uniform(0, 2 * math.pi),
             "radial": rng.uniform(0.10, 0.30),
         }
-        # 2. MANCHAS: gaussianas con centro y sigma aleatorios.
+        #  BLOBS: gaussians with a random center and sigma.
         blobs = [
             (rng.uniform(0, self.width),
              rng.uniform(0, self.height),
              rng.uniform(2.0, 6.0))
             for _ in range(rng.randint(8, 14))
         ]
-        # 3. ONDAS: senos direccionales con ángulo/frecuencia/fase aleatorios.
+        #  WAVES: directional sines with random angle/frequency/phase.
         waves = [
             (rng.uniform(0, math.pi),
              rng.uniform(0.08, 0.28),
@@ -175,10 +175,10 @@ class TerrainField:
         return [row[:] for row in self._heightmap]
 
     def noise_pipeline(self) -> Dict[str, object]:
-        """Los 3 ruidos del heightmap, normalizados, más su promedio.
+        """The 3 heightmap noises, normalized, plus their average.
 
-        Para visualización: muestra de qué está hecho el terreno antes de
-        la cuantización. Determinista para la misma seed.
+        For visualization: shows what the terrain is made of before
+        quantization. Deterministic for the same seed.
         """
         rng = random.Random(self._noise_seed())
         star_p, blobs_p, waves_p = self._draw_noise_params(rng)
@@ -206,10 +206,10 @@ class TerrainField:
         return z < self.height_at(x, y)
 
     def _build_heightmap(self) -> List[List[int]]:
-        """Estrella + manchas + ondas -> promedio -> contraste -> cuantización.
+        """Star + blobs + waves -> average -> contrast -> quantization.
 
-        Sin pasadas de mediana, sin recorte de picos y sin sublomas: lo que
-        sale de los 3 ruidos es el terreno final.
+        No median passes, no peak clipping and no sub-hills: what comes out of
+        the 3 noises is the final terrain.
         """
         rng = random.Random(self._noise_seed())
         star_p, blobs_p, waves_p = self._draw_noise_params(rng)
@@ -226,8 +226,8 @@ class TerrainField:
         for x in range(self.width):
             for y in range(self.height):
                 n = (f_star[x][y] + f_blobs[x][y] + f_waves[x][y]) / 3.0
-                # Contraste: estira el promedio alrededor de 0.5 para que el
-                # mapa use todo el rango [0, depth-1].
+                # Contrast: stretch the average around 0.5 so the map uses the
+                # whole [0, depth-1] range.
                 n = 0.5 + (n - 0.5) * self.height_contrast
                 n = max(0.0, min(1.0, n))
                 h = int(n * (self.depth - 1) + 0.5)

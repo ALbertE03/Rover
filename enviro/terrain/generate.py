@@ -205,16 +205,16 @@ class MapGenerator:
     # construction 
 
     def _place_terrain(self) -> Dict[str, Cell]:
-        """Terreno disperso en z: solo hay bloques donde hay loma.
+        """Terrain scattered along z: there are only blocks where there is a hill.
 
-        Para cada (x, y), h = height_at(x, y) en [0, depth-1]:
-        - z > h: aire, no se crea celda.
-        - z == h: superficie transitable (cima plana de la meseta).
-        - z < h: interior sólido de la loma, bloqueado. No se puede estar
-          en (1,1,1) si la loma llega a (1,1,2): hay que subir por fuera.
+        For each (x, y), h = height_at(x, y) in [0, depth-1]:
+        - z > h: air, no cell is created.
+        - z == h: traversable surface (the flat top of the plateau).
+        - z < h: solid interior of the hill, blocked. You cannot stand in
+          (1,1,1) if the hill reaches (1,1,2): you have to climb up from outside.
 
-        Así el eje z solo crea bloques donde hay lomas y las lomas son
-        mesetas de varias celdas planas arriba (ver TerrainField).
+        So the z axis only creates blocks where there are hills, and the hills
+        are plateaus several flat cells deep on top (see TerrainField).
         """
         cells: Dict[str, Cell] = {}
         for x in range(self.params.width):
@@ -222,19 +222,19 @@ class MapGenerator:
                 h = self.field.height_at(x, y)
                 for z in range(self.params.depth):
                     if z > h:
-                        continue  # aire
+                        continue  # air
                     id_ = cell_id(x, y, z)
                     cell = Cell(id_, (x, y, z), self.field.terrain_at(x, y, z))
                     if z < h:
-                        cell.blocked = True  # interior sólido
+                        cell.blocked = True  # solid interior
                     cells[id_] = cell
         return cells
 
     def _place_boulders(self, cells: Dict[str, Cell]) -> None:
         """Block surface cells independently with probability ``block_rate``.
 
-        Solo la superficie puede tener boulders. El interior ya está
-        bloqueado por ser sólido y el aire no existe como celda.
+        Only the surface can carry boulders. The interior is already blocked
+        for being solid, and air does not exist as a cell.
         """
         for cell in cells.values():
             x, y, z = cell.pos
@@ -254,9 +254,9 @@ class MapGenerator:
 
         grid = self.config.get("network", {}).get("grid")
         if grid:
-            # Malla: puntos evenly spaced, cada uno anclado a la celda
-            # transitable más cercana. Para baterías chicas: la malla
-            # garantiza saltos cortos entre bases vecinas.
+            # Grid: evenly spaced points, each anchored to the nearest
+            # traversable cell. For small batteries: the grid guarantees short
+            # hops between neighbouring bases.
             nx, ny = int(grid[0]), int(grid[1])
             if nx < 1 or ny < 1 or nx * ny < len(presets):
                 raise ValueError(
@@ -307,9 +307,9 @@ class MapGenerator:
             by_layer.setdefault(parse_cell_id(id_)[2], []).append(id_)
 
         chosen: List[str] = []
-        # Las capas compiten por interés: la más interesante aporta el primer
-        # POI. Así, con más capas que POIs, los puntos caen donde el costo y
-        # la recompensa están, no en las capas bajas por defecto.
+        # Layers compete on interest: the most interesting one contributes the
+        # first POI. So with more layers than POIs, the points land where the
+        # cost and the reward are, not on the low layers by default.
         layer_interest = {
             layer: max(self._interest(cells[id_]) for id_ in ids)
             for layer, ids in by_layer.items()
@@ -457,10 +457,10 @@ class MapGenerator:
         return self.rng.choice([id_ for score, id_ in scored if score == best])
 
     def _surface_cells(self, cells: Dict[str, Cell]) -> List[Cell]:
-        """Celdas transitables en la superficie real (cima de cada columna).
+        """Traversable cells on the real surface (the top of each column).
 
-        Ya no es z=0: es z == height_at(x, y). En orden estable para que
-        la generación sea reproducible.
+        No longer z=0: it is z == height_at(x, y). In a stable order so
+        generation stays reproducible.
         """
         out: List[Cell] = []
         for x in range(self.params.width):
