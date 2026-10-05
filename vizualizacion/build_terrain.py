@@ -1,7 +1,7 @@
 from dataclasses import replace
 from html import escape
 from pathlib import Path
-from typing import Dict, List, Optional,Tuple
+from typing import Dict, List, Optional
 
 from enviro.config import load_config
 from enviro.terrain import (
