@@ -34,7 +34,7 @@ class TerrainField:
         self.octaves = 1
         self.weights = {"x": 0.5, "y": 0.5}
         self.bands: List[Tuple[float, str]] = []
-        self.height_contrast = 2.0
+        self.height_contrast = 3.0
         self._heightmap: Optional[List[List[int]]] = None
         self._configure(settings if settings is not None else get("generation"))
 
@@ -47,7 +47,7 @@ class TerrainField:
             [(float(b["max"]), str(b["terrain"])) for b in settings.get("bands", [])],
             key=lambda pair: pair[0],
         )
-        self.height_contrast = float(settings.get("height_contrast", 2.0))
+        self.height_contrast = float(settings.get("height_contrast", 3.0))
         self._validate()
 
     def _validate(self) -> None:
