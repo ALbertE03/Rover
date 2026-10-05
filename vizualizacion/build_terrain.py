@@ -90,7 +90,6 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
         "seed": seed, "W": width, "H": height, "depth": depth,
         "noise": nz,
         "block_rate":gen.config['map']['block_rate'],
-        "gen":gen.config["generation"]['height_contrast'],
         "heightmap": hm,
         "terrain": terrain,
         "terrain_mix": mix,
@@ -165,11 +164,11 @@ def _quant_report(e: Dict) -> str:
 
     if e["top_layer_flat"] < e["top_layer"]:
         stretch = (f"El estiramiento es lo que llega a z={e['top_layer']}: con "
-                   f"<code>height_contrast={e["gen"]}</code> este mapa se queda en "
+                   f"<code>height_contrast={e["contrast"]}</code> este mapa se queda en "
                    f"z={e['top_layer_flat']} y la capa alta saldría vacía.")
     else:
         stretch = (f"Con depth={depth} el estiramiento no es lo que llega a "
-                   f"z={e['top_layer']}: <code>height_contrast={e["gen"]}</code> también "
+                   f"z={e['top_layer']}: <code>height_contrast={e["contrast"]}</code> también "
                    f"llega (z={e['top_layer_flat']}). Lo que cambia es cómo se reparten "
                    f"las columnas, no si la cima existe.")
 
