@@ -197,10 +197,119 @@ def _quant_report(e: Dict) -> str:
         "</div>")
 
 
+def _png_b64(img) -> str:
+    """PIL image -> base64 data URI."""
+    import base64, io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _gray(v: float) -> tuple:
+    g = max(0, min(255, int(round(20 + v * 220))))
+    return (g, g, g)
+
+
+def _hex(h: str) -> tuple:
+    h = h.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+
+def _map_png(e: Dict, kind: str, scale: int = 10):
+    """Render one map panel as a PIL image. No JavaScript needed."""
+    from PIL import Image, ImageDraw
+    W, H = e["W"], e["H"]
+    img = Image.new("RGB", (W * scale, H * scale), (10, 13, 18))
+    px = img.load()
+    nz = e["noise"]
+    if kind == "star":
+        data = nz["star"]
+        for i in range(W):
+            for j in range(H):
+                c = _gray(data[i][j])
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "blobs":
+        data = nz["blobs"]
+        for i in range(W):
+            for j in range(H):
+                c = _gray(data[i][j])
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "waves":
+        data = nz["waves"]
+        for i in range(W):
+            for j in range(H):
+                c = _gray(data[i][j])
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "combined":
+        data = nz["combined"]
+        for i in range(W):
+            for j in range(H):
+                c = _gray(data[i][j])
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "contrast":
+        data = nz["combined"]
+        ct = e["contrast"]
+        for i in range(W):
+            for j in range(H):
+                v = max(0.0, min(1.0, 0.5 + (data[i][j] - 0.5) * ct))
+                c = _gray(v)
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "height":
+        colors = [_hex(c) for c in e["height_colors"]]
+        hm = e["heightmap"]
+        for i in range(W):
+            for j in range(H):
+                c = colors[hm[i][j]]
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+    elif kind == "terrain":
+        tcol = {"plain": (74, 124, 89), "sand": (201, 162, 39),
+                "rock": (107, 114, 128), "crevasse": (31, 41, 55)}
+        for i in range(W):
+            for j in range(H):
+                c = tcol.get(e["terrain"][f"{i},{j}"], (51, 51, 51))
+                for a in range(scale):
+                    for b in range(scale):
+                        px[i * scale + a, j * scale + b] = c
+        # boulders as red triangles, stations/POIs as labeled dots
+        d = ImageDraw.Draw(img)
+        bs = max(4, scale - 2)
+        for bx, by in e["boulders"]:
+            cx, cy = bx * scale + scale // 2, by * scale + scale // 2
+            d.polygon([(cx, cy - bs // 2), (cx - bs // 2, cy + bs // 2),
+                       (cx + bs // 2, cy + bs // 2)], fill=(255, 135, 135))
+        r = max(5, int(scale * 0.7))
+        for s in e["stations"]:
+            cx, cy = s["x"] * scale + scale // 2, s["y"] * scale + scale // 2
+            col = (126, 240, 160) if s["main"] else (255, 169, 77)
+            d.ellipse([cx - r, cy - r, cx + r, cy + r],
+                      fill=(10, 13, 18), outline=col, width=2)
+            d.text((cx - 4, cy - 7), "B" if s["main"] else "R", fill=col)
+        for p in e["pois"]:
+            cx, cy = p["x"] * scale + scale // 2, p["y"] * scale + scale // 2
+            col = (199, 146, 234)
+            d.ellipse([cx - r, cy - r, cx + r, cy + r],
+                      fill=(10, 13, 18), outline=col, width=2)
+            d.text((cx - 4, cy - 7), "O", fill=col)
+    return img
+
+
 def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
     """Self-contained HTML showing the pipeline behind every map.
 
-    Tabs: a comparison overview first, then one tab per seed.
+    All visualizations are server-rendered PNGs (no JavaScript needed).
+    Tabs use CSS-only radio buttons. Comparison tab is default.
     """
     heading = escape(title)
     parts = []
@@ -214,9 +323,8 @@ h1{font-size:19px}h2{font-size:16px;margin:26px 0 8px;color:#9fd0ff}
 .panel{background:#1a2230;border-radius:10px;padding:10px;margin-bottom:12px}
 .panel h3{margin:4px 0 8px;font-size:12px;color:#cfe3ff}
 .note{background:#1a2230;border-left:4px solid #e2a63d;border-radius:6px;padding:10px 14px;margin:12px 0;font-size:13px;line-height:1.6}
-canvas{border-radius:8px;background:#0a0d12;max-width:100%}
+img.viz{border-radius:8px;background:#0a0d12;max-width:100%;image-rendering:pixelated}
 code{background:#0a0d12;padding:1px 6px;border-radius:4px;font-size:12px}
-hr{border:0;border-top:2px solid #2b3a55;margin:30px 0}
 .legend{font-size:12px;color:#9aa3b2;margin-top:6px;line-height:1.9}
 ol.steps{margin:8px 0;padding-left:22px}
 ol.steps li{margin:5px 0}
@@ -227,18 +335,22 @@ table.kv td:first-child{color:#9aa3b2}
 td.num{text-align:right;white-space:nowrap;color:#9aa3b2}
 td.bar{width:26%}
 td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
-.cap{display:block;color:#9aa3b2;font-size:12px;margin-top:8px;line-height:1.6}
 .m{display:inline-block;min-width:1em;text-align:center;font-family:ui-monospace,monospace;
    font-weight:700;background:#0a0d12;border-radius:3px;padding:0 3px;margin-right:2px}
 .mB{color:#7ef0a0}.mR{color:#ffa94d}.mO{color:#c792ea}.mA{color:#ff8787}
 .dim{color:#79839a;font-size:11px}
 .feat{margin-top:8px;line-height:2}
+/* CSS-only tabs */
 .tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}
-.tab{background:#2b3a55;border:0;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer}
-.tab:hover{background:#3a4d73}
-.tab.on{background:#4c6ef5}
+.tabs input{display:none}
+.tabs label{background:#2b3a55;color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer}
+.tabs label:hover{background:#3a4d73}
+.tabs input:checked+label{background:#4c6ef5}
 .tabsec{display:none}
-.tabsec.on{display:block}
+#t-cmp:checked~#sec-cmp{display:block}
+""" + "\n".join(
+        f"#t-{e['seed']}:checked~#sec-{e['seed']}{{display:block}}"
+        for e in entries) + """
 .cmp-grid{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
 </style></head><body>
 <h1>""" + heading + f"""</h1>
@@ -246,31 +358,33 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
 &rarr; promedio &rarr; contraste &rarr; <b>cuantizaci&oacute;n</b>.
 Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por columna) bloquean el paso.</div>
 
-<div class="tabs" id="tabs"></div>
+<div class="tabs">
+<input type="radio" name="tab" id="t-cmp" checked><label for="t-cmp">Comparaci\u00f3n</label>
+""" + "\n".join(
+        f'<input type="radio" name="tab" id="t-{e["seed"]}">'
+        f'<label for="t-{e["seed"]}">Seed {e["seed"]}</label>'
+        for e in entries) + """
+</div>
 """)
 
     # ---- Comparison tab (default) ----
-    parts.append('<div class="tabsec on" id="tab-cmp">')
+    parts.append('<div class="tabsec" id="sec-cmp">')
     parts.append("<h2>Comparaci\u00f3n de terrenos</h2>")
     parts.append("<div class='cmp-grid'>")
     for e in entries:
         seed = e["seed"]
-        W, H = e["W"], e["H"]
-        S = max(2, 320 // W)
-        SZ = W * S
+        h64 = _png_b64(_map_png(e, "height", scale=8))
+        t64 = _png_b64(_map_png(e, "terrain", scale=8))
         parts.append(
-            f"<div class='panel'><h3>Seed {seed} \u2014 altura final</h3>"
-            f"<canvas id='cmpH{seed}' width='{SZ}' height='{SZ}'></canvas>"
-            f"<canvas id='cmpT{seed}' width='{SZ}' height='{SZ}' "
-            f"style='margin-top:8px'></canvas>"
+            f"<div class='panel'><h3>Seed {seed}</h3>"
+            f"<img class='viz' src='{h64}'><br>"
+            f"<img class='viz' src='{t64}' style='margin-top:8px'>"
             f"<div class='legend'>arriba: altura z \u00b7 abajo: terrenos</div></div>")
     parts.append("</div>")
 
-    # Comparison table: height histograms + terrain mix side by side
     parts.append("<h2>N\u00fameros lado a lado</h2>")
     parts.append('<table class="kv"><tr><th></th>' +
                  "".join(f"<th>Seed {e['seed']}</th>" for e in entries) + "</tr>")
-    # Height histogram rows
     depth = entries[0]["depth"]
     max_hist = max(max(e["layer_hist"]) for e in entries)
     for z in range(depth):
@@ -284,7 +398,6 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
                 f"<td class='num'>{c} ({pct:.0f}%)</td>"
                 f"<td class='bar'><span style='width:{w:.0f}%;background:{col}'></span></td>")
         parts.append("</tr>")
-    # Terrain mix rows
     terrains = sorted({t for e in entries for t in e["terrain_mix"]})
     max_mix = max(max(e["terrain_mix"].values()) for e in entries)
     tcol = {"plain": "#4a7c59", "sand": "#c9a227", "rock": "#6b7280", "crevasse": "#1f2937"}
@@ -298,151 +411,62 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
                 f"<td class='num'>{c}</td>"
                 f"<td class='bar'><span style='width:{w:.0f}%;background:{tcol.get(t,'#888')}'></span></td>")
         parts.append("</tr>")
-    # Counts
     for label, key in [("Rocas \u25b2", "boulders"), ("POIs", "pois"), ("Bases", "stations")]:
         parts.append(f"<tr><td>{label}</td>")
         for e in entries:
             parts.append(f"<td class='num' colspan='2'>{len(e[key])}</td>")
         parts.append("</tr>")
     parts.append("</table>")
-    parts.append('</div>')  # end comparison tab
+    parts.append('</div>')
 
+    # ---- Per-seed tabs ----
     for e in entries:
         seed = e["seed"]
-        parts.append(f'<div class="tabsec" id="tab-{seed}">')
+        parts.append(f'<div class="tabsec" id="sec-{seed}">')
         W, H, depth = e["W"], e["H"], e["depth"]
-        S = max(2, 480 // W)
-        SZ = W * S
         mix = ", ".join(f"{k}: {v}" for k, v in sorted(e["terrain_mix"].items()))
-        parts.append(f"<hr><h1>Semilla {seed} \u2014 {W}\u00d7{H}\u00d7{depth}</h1>")
+        parts.append(f"<h2>Semilla {seed} \u2014 {W}\u00d7{H}\u00d7{depth}</h2>")
         parts.append("<h2>El mapa, paso a paso</h2><div class='grid'>")
         stages = [
-            (f"cvS{seed}", f"1. Estrella ({e['noise']['star_arms']} brazos)"),
-            (f"cvB{seed}", f"2. Manchas ({e['noise']['n_blobs']})"),
-            (f"cvW{seed}", "3. Ondas"),
-            (f"cvC{seed}", "4. Promedio de los 3"),
-            (f"cvX{seed}", f"5. Estiramiento de contraste (x{e['contrast']:g})"
-                            f" + recorte [0,1]"),
-            (f"cvH{seed}", "6. Cuantizada \u2192 altura z"),
-            (f"cvT{seed}", "7. Terrenos + rocas \u25b2"),
+            ("star", f"1. Estrella ({e['noise']['star_arms']} brazos)"),
+            ("blobs", f"2. Manchas ({e['noise']['n_blobs']})"),
+            ("waves", "3. Ondas"),
+            ("combined", "4. Promedio de los 3"),
+            ("contrast", f"5. Contraste (x{e['contrast']:g}) + recorte [0,1]"),
+            ("height", "6. Cuantizada \u2192 altura z"),
+            ("terrain", "7. Terrenos + rocas \u25b2"),
         ]
-        for cid, name in stages:
+        for kind, name in stages:
+            b64 = _png_b64(_map_png(e, kind, scale=max(4, 480 // W)))
             parts.append(f"<div class='panel'><h3>{name}</h3>"
-                         f"<canvas id='{cid}' width='{SZ}' height='{SZ}'></canvas></div>")
+                         f"<img class='viz' src='{b64}'></div>")
         parts.append("</div>")
         zleg = " ".join(
             f"<span style='color:{c}'>\u25a0</span>z={z}"
             for z, c in enumerate(e["height_colors"]))
-        bases = [f"<b class='mB'>{_mark('B')}</b> {escape(s['id'])}"
-                 f"<span class='dim'> ({s['x']},{s['y']},z{s['z']} &middot; "
-                 f"r={s['radius']:g} &middot; se&ntilde;al {s['signal']:g})</span>"
+        bases = [f"<b class='mB'>B</b> {escape(s['id'])}"
+                 f"<span class='dim'> ({s['x']},{s['y']},z{s['z']})</span>"
                  for s in e["stations"] if s["main"]]
-        relays = [f"<b class='mR'>{_mark('R')}</b> {escape(s['id'])}"
-                  f"<span class='dim'> ({s['x']},{s['y']},z{s['z']} &middot; "
-                  f"r={s['radius']:g} &middot; se&ntilde;al {s['signal']:g})</span>"
+        relays = [f"<b class='mR'>R</b> {escape(s['id'])}"
+                  f"<span class='dim'> ({s['x']},{s['y']},z{s['z']})</span>"
                   for s in e["stations"] if not s["main"]]
         poi_list = ", ".join(
-            f"<b class='mO'>{_mark('O')}</b> {escape(p['id'])}"
-            f"<span class='dim'> ({p['x']},{p['y']},z{p['z']} &middot; "
-            f"inter&eacute;s {p['interest']:.2f})</span>"
+            f"<b class='mO'>O</b> {escape(p['id'])}"
+            f"<span class='dim'> ({p['x']},{p['y']},z{p['z']} \u00b7 "
+            f"inter\u00e9s {p['interest']:.2f})</span>"
             for p in e["pois"]) or "sin pois"
         parts.append(
             f"<div class='note'><b>{len(e['boulders'])} rocas</b> \u00b7 "
             f"{len(e['pois'])} pois \u00b7 {len(e['stations'])} bases \u00b7 "
             f"terrenos: {mix}<br>"
-            f"<span class='legend'>Altura: {zleg} \u00b7 "
-            f"Terreno: <span style='color:#4a7c59'>\u25a0</span>llano "
-            f"<span style='color:#c9a227'>\u25a0</span>arena "
-            f"<span style='color:#6b7280'>\u25a0</span>roca "
-            f"<span style='color:#1f2937'>\u25a0</span>grieta</span>"
-            f"<span class='legend feat'>Marcas: "
-            f"<b class='mB'>{_mark('B')}</b>base principal \u00b7 "
-            f"<b class='mR'>{_mark('R')}</b>base repetidora \u00b7 "
-            f"<b class='mO'>{_mark('O')}</b>poi de inter&eacute;s \u00b7 "
-            f"<b class='mA'>{_mark(chr(0x25B2))}</b>roca<br>"
+            f"<span class='legend'>Altura: {zleg}</span>"
+            f"<span class='legend feat'>"
             f"{' \u00b7 '.join(bases)}{' \u00b7 '.join(relays)}<br>{poi_list}</span>"
             "</div>")
         parts.append(_quant_report(e))
-        parts.append('</div>')  # end seed tab
+        parts.append('</div>')
 
-
-    parts.append("<script>")
-    parts.append("const D=" + json.dumps({"entries": entries}) + ";")
-    parts.append("""
-const TC={"plain":"#4a7c59","sand":"#c9a227","rock":"#6b7280","crevasse":"#1f2937"};
-function gray(v){const g=Math.round(20+v*220);return "rgb("+g+","+g+","+g+")";}
-// Tabs: comparison first, then one per seed.
-(function(){
-  const tabs=document.getElementById("tabs");
-  const mk=(id,label,on)=>{
-    const b=document.createElement("button");
-    b.className="tab"+(on?" on":"");b.textContent=label;
-    b.onclick=()=>{
-      document.querySelectorAll(".tab").forEach(t=>t.classList.remove("on"));
-      b.classList.add("on");
-      document.querySelectorAll(".tabsec").forEach(s=>s.classList.remove("on"));
-      document.getElementById(id).classList.add("on");
-      window.scrollTo({top:0});
-    };
-    tabs.appendChild(b);
-  };
-  mk("tab-cmp","Comparaci\\u00f3n",true);
-  D.entries.forEach(e=>mk("tab-"+e.seed,"Seed "+e.seed,false));
-})();
-// Comparison mini-maps.
-D.entries.forEach((e)=>{
-  const W=e.W,H=e.H,S=Math.max(2,Math.floor(320/W));
-  const ph=(id,fn)=>{const c=document.getElementById(id);if(!c)return;
-    const x=c.getContext("2d");
-    for(let i=0;i<W;i++)for(let j=0;j<H;j++){x.fillStyle=fn(i,j);x.fillRect(i*S,j*S,S,S);}};
-  ph("cmpH"+e.seed,(i,j)=>e.height_colors[e.heightmap[i][j]]);
-  ph("cmpT"+e.seed,(i,j)=>TC[e.terrain[i+","+j]]||"#333");
-});
-D.entries.forEach((e)=>{
-  const seed=e.seed,W=e.W,H=e.H,S=Math.max(2,Math.floor(480/W));
-  const paint=(id,fn)=>{const c=document.getElementById(id),x=c.getContext("2d");
-    for(let i=0;i<W;i++)for(let j=0;j<H;j++){x.fillStyle=fn(i,j);x.fillRect(i*S,j*S,S,S);}};
-  const nz=e.noise;
-  paint("cvS"+seed,(i,j)=>gray(nz.star[i][j]));
-  paint("cvB"+seed,(i,j)=>gray(nz.blobs[i][j]));
-  paint("cvW"+seed,(i,j)=>gray(nz.waves[i][j]));
-  paint("cvC"+seed,(i,j)=>gray(nz.combined[i][j]));
-  {const ct=(v)=>0.5+(v-0.5)*e.contrast;
-   paint("cvX"+seed,(i,j)=>gray(Math.max(0,Math.min(1,ct(nz.combined[i][j])))));}
-  paint("cvH"+seed,(i,j)=>e.height_colors[e.heightmap[i][j]]);
-  {const c=document.getElementById("cvT"+seed),x=c.getContext("2d");
-   for(let i=0;i<W;i++)for(let j=0;j<H;j++){
-     x.fillStyle=TC[e.terrain[i+","+j]]||"#333";x.fillRect(i*S,j*S,S,S);
-     x.strokeStyle="rgba(0,0,0,.25)";x.strokeRect(i*S+.5,j*S+.5,S-1,S-1);}
-   x.textAlign="center";x.textBaseline="middle";
-   const mark=(cx,cy,ch,col,font)=>{
-     x.font=font;
-     x.lineWidth=Math.max(1,S/6);x.strokeStyle="rgba(0,0,0,.75)";
-     x.strokeText(ch,cx,cy);x.fillStyle=col;x.fillText(ch,cx,cy);};
-   const small=Math.max(6,S-6)+"px sans-serif";
-   for(const b of e.boulders)mark(b[0]*S+S/2,b[1]*S+S/2+1,"\\u25b2","#ff8787",small);
-   /* Ground features, grouped per cell so two marks on one column stay legible. */
-   const marks={};
-   const put=(k,ch,col)=>{(marks[k]=marks[k]||[]).push([ch,col]);};
-   e.stations.forEach(s=>put(s.x+","+s.y,s.main?"B":"R",s.main?"#7ef0a0":"#ffa94d"));
-   e.pois.forEach(p=>put(p.x+","+p.y,"O","#c792ea"));
-   const big="bold "+Math.max(12,Math.round(S*1.6))+"px sans-serif";
-   const r=Math.max(6,Math.round(S*0.78));
-   for(const k in marks){
-     const list=marks[k],xy=k.split(",");
-     /* Clamp so the disc stays whole on edge and corner columns: relays
-        always land in a corner (farthest-point fill), so this is the norm. */
-     const cx=Math.min(Math.max(xy[0]*S+S/2,r+1),c.width-r-1);
-     const cy=Math.min(Math.max(xy[1]*S+S/2,r+1),c.height-r-1);
-     list.forEach((m,i)=>{
-       const dx=list.length>1?(i-(list.length-1)/2)*(r*2.15):0;
-       x.beginPath();x.arc(cx+dx,cy,r,0,6.2832);
-       x.fillStyle="rgba(10,13,18,.88)";x.fill();
-       x.lineWidth=1.5;x.strokeStyle=m[1];x.stroke();
-       mark(cx+dx,cy+1,m[0],m[1],big);});}}
-});
-</script></body></html>
-""")
+    parts.append("</body></html>")
     return "\n".join(parts)
 
 
