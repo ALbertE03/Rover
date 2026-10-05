@@ -50,19 +50,19 @@
       },
       {
         "id": "relay",
-        "radius": 3.0,
+        "radius": 0.0,
         "signal": 0.8
       }
     ]
   },
   "poi": {
-    "count": 3,
+    "count": 5,
     "min_visibility": 0.7,
     "interest_climb_weight": 0.6,
     "interest_ground_weight": 0.4
   },
   "rover": {
-    "battery": 75.0,
+    "battery": 100.0,
     "memory": 2.0
   },
   "terrain": {
