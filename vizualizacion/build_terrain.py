@@ -40,7 +40,8 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
         for y in range(height):
             c = m.cell(sid(x, y))
             terrain[f"{x},{y}"] = c.true_terrain if c else "?"
-            if c is not None and c.blocked:
+            # Blocked by a boulder, not by lava (lava melts the rock).
+            if c is not None and c.blocked and c.true_terrain != "lava":
                 boulders.append([x, y])
 
     mix: Dict[str, int] = {}
@@ -256,7 +257,7 @@ def _quant_report(e: Dict) -> str:
         "</div>")
 
 
-def _png_b64(img) -> str:
+def _png_b64(img: "Image.Image") -> str:
     """PIL image -> base64 data URI."""
     import base64
     import io
@@ -294,89 +295,64 @@ def _hex(h: str) -> tuple:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-def _map_png(e: Dict, kind: str, scale: int = 10):
-    """Render one map panel as a PIL image. No JavaScript needed."""
+def _map_png(e: Dict, kind: str, scale: int = 10) -> "Image.Image":
+    """Render one map panel as a PIL image. No JavaScript needed.
+
+    Builds at 1px per cell, then upscales with NEAREST (C speed) instead of
+    Python pixel loops at scale.
+    """
     from PIL import Image, ImageDraw
     W, H = e["W"], e["H"]
-    img = Image.new("RGB", (W * scale, H * scale), (10, 13, 18))
-    px = img.load()
+    # 1px per cell base
+    base = Image.new("RGB", (W, H), (10, 13, 18))
+    px = base.load()
     nz = e["noise"]
+
+    def _fill(fn):
+        for i in range(W):
+            for j in range(H):
+                px[i, j] = fn(i, j)
+
     if kind == "star":
         data = nz["star"]
-        for i in range(W):
-            for j in range(H):
-                c = _gray(data[i][j])
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: _gray(data[i][j]))
     elif kind == "blobs":
         data = nz["blobs"]
-        for i in range(W):
-            for j in range(H):
-                c = _gray(data[i][j])
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: _gray(data[i][j]))
     elif kind == "waves":
         data = nz["waves"]
-        for i in range(W):
-            for j in range(H):
-                c = _gray(data[i][j])
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: _gray(data[i][j]))
     elif kind == "combined":
         data = nz["combined"]
-        for i in range(W):
-            for j in range(H):
-                c = _gray(data[i][j])
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: _gray(data[i][j]))
     elif kind == "contrast":
         data = nz["combined"]
         ct = e["contrast"]
-        for i in range(W):
-            for j in range(H):
-                v = max(0.0, min(1.0, 0.5 + (data[i][j] - 0.5) * ct))
-                c = _gray(v)
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: _gray(max(0.0, min(1.0, 0.5 + (data[i][j] - 0.5) * ct))))
     elif kind == "height":
         colors = [_hex(c) for c in e["height_colors"]]
         hm = e["heightmap"]
-        for i in range(W):
-            for j in range(H):
-                c = colors[hm[i][j]]
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
+        _fill(lambda i, j: colors[hm[i][j]])
     elif kind == "biomes":
         bcol = [(122, 162, 247), (158, 206, 106), (255, 158, 100),
                 (186, 110, 220), (100, 200, 200)]
         bm = e["biome_map"]
-        for i in range(W):
-            for j in range(H):
-                b = bm[i][j]
-                c = bcol[b % len(bcol)] if b >= 0 else (40, 40, 40)
-                for a in range(scale):
-                    for b_ in range(scale):
-                        px[i * scale + a, j * scale + b_] = c
-        # mark centers
+        _fill(lambda i, j: bcol[bm[i][j] % len(bcol)] if bm[i][j] >= 0 else (40, 40, 40))
+    elif kind == "terrain":
+        tcol = {t["name"]: t["rgb"] for t in e["terrain_catalogue"]}
+        terr = e["terrain"]
+        _fill(lambda i, j: tcol.get(terr[f"{i},{j}"], (51, 51, 51)))
+
+    # upscale (C implementation, keeps hard pixel edges)
+    img = base.resize((W * scale, H * scale), Image.NEAREST)
+
+    if kind == "biomes":
         d = ImageDraw.Draw(img)
         for cx, cy in e["biome_centers"]:
             x, y = int(cx * scale), int(cy * scale)
             d.ellipse([x - 5, y - 5, x + 5, y + 5],
                       fill=(255, 255, 255), outline=(0, 0, 0), width=2)
     elif kind == "terrain":
-        tcol = {t["name"]: t["rgb"] for t in e["terrain_catalogue"]}
-        for i in range(W):
-            for j in range(H):
-                c = tcol.get(e["terrain"][f"{i},{j}"], (51, 51, 51))
-                for a in range(scale):
-                    for b in range(scale):
-                        px[i * scale + a, j * scale + b] = c
         # boulders as red triangles, stations/POIs as labeled dots
         d = ImageDraw.Draw(img)
         bs = max(4, scale - 2)
@@ -572,7 +548,8 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
                         if e["pois"] else 0)
         hdist = ", ".join(f"z{z}:{c}" for z, c in enumerate(e["layer_hist"]))
 
-        def _row(emoji, label, val_txt, frac_val, frac_max, col):
+        def _row(emoji: str, label: str, val_txt: str,
+                 frac_val: float, frac_max: float, col: str) -> str:
             bar = _bar_png(frac_val, frac_max, color=_BCOL[col])
             return (f"<div class='stat-row'><span>{emoji} {label}: "
                     f"<b>{val_txt}</b></span>"

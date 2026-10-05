@@ -1,33 +1,30 @@
 import math
 import random
-from typing import Dict, List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple
 from ..config import get
 from .catalogue import terrain_names
+from .types import (
+    BiomeCenter,
+    Blob,
+    Config,
+    FloatGrid,
+    HeightGrid,
+    NoiseParams,
+    NoisePipeline,
+    StarParams,
+    TerrainBand,
+    Wave,
+    XY,
+)
 
 
-class NoisePipeline(TypedDict):
-    """What :meth:`TerrainField.noise_pipeline` hands back.
-
-    A TypedDict rather than ``Dict[str, ...]`` because the grids and the
-    scalar metadata travel in the same mapping: a plain dict would have to
-    collapse to ``object`` and every reader would lose the element type.
-    """
-    star: List[List[float]]
-    blobs: List[List[float]]
-    waves: List[List[float]]
-    combined: List[List[float]]
-    star_arms: int
-    star_center: Tuple[float, float]
-    n_blobs: int
-
-
-def _biased_bands(bands: List[Tuple[float, str]],
-                  dominant: str) -> List[Tuple[float, str]]:
+def _biased_bands(bands: List[TerrainBand],
+                  dominant: str) -> List[TerrainBand]:
     """Widen the dominant terrain's band so it clusters in its biome.
 
     Doubles the dominant band's width by stealing half from each neighbor.
     """
-    widths = []
+    widths: List[float] = []
     prev = 0.0
     for edge, _ in bands:
         widths.append(edge - prev)
@@ -39,7 +36,8 @@ def _biased_bands(bands: List[Tuple[float, str]],
             take = widths[j] * 0.4
             widths[j] -= take
             widths[idx] += take
-    out, edge = [], 0.0
+    out: List[TerrainBand] = []
+    edge = 0.0
     for w, (_, name) in zip(widths, bands):
         edge += w
         out.append((edge, name))
@@ -65,7 +63,7 @@ class TerrainField:
         height: int,
         depth: int,
         origin: Tuple[float, float] = (0.0, 0.0),
-        settings: Optional[Dict] = None,
+        settings: Optional[Config] = None,
     ) -> None:
         self.width = width
         self.height = height
@@ -74,13 +72,13 @@ class TerrainField:
         self.depth_slope = 0.0
         self.scale = 1
         self.octaves = 1
-        self.weights = {"x": 0.5, "y": 0.5}
-        self.bands: List[Tuple[float, str]] = []
+        self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
+        self.bands: List[TerrainBand] = []
         self.height_contrast = 3.0
-        self._heightmap: Optional[List[List[int]]] = None
+        self._heightmap: Optional[HeightGrid] = None
         self._configure(settings if settings is not None else get("generation"))
 
-    def _configure(self, settings: Dict) -> None:
+    def _configure(self, settings: Config) -> None:
         self.scale = settings.get("noise_scale", 2)
         self.octaves = settings.get("noise_octaves", 3)
         self.weights = dict(settings.get("axis_weights", {"x": 0.5, "y": 0.5}))
@@ -93,8 +91,8 @@ class TerrainField:
         # Biomes: K Voronoi regions, each with bands biased toward a dominant
         # terrain so types cluster into regions instead of scattering.
         self.biome_count = int(settings.get("biome_count", 0))
-        self.biome_centers: List[Tuple[float, float]] = []
-        self.biome_bands: List[List[Tuple[float, str]]] = []
+        self.biome_centers: List[BiomeCenter] = []
+        self.biome_bands: List[List[TerrainBand]] = []
         if self.biome_count > 1:
             rng = random.Random(settings.get("seed", 0) ^ 0xB10E)
             names = [name for _, name in self.bands]
@@ -162,10 +160,10 @@ class TerrainField:
         return int(self.origin[0] * 1000 + self.origin[1] * 1000
                    + self.width * 131 + self.height * 17)
 
-    def _draw_noise_params(self, rng: random.Random):
+    def _draw_noise_params(self, rng: random.Random) -> NoiseParams:
         """Draw the parameters of the 3 noises. Everything comes from the seed."""
         #  STAR: radial arms from a random center.
-        star = {
+        star: StarParams = {
             "cx": rng.uniform(0, self.width),
             "cy": rng.uniform(0, self.height),
             "arms": rng.randint(3, 5),
@@ -173,14 +171,14 @@ class TerrainField:
             "radial": rng.uniform(0.10, 0.30),
         }
         #  BLOBS: gaussians with a random center and sigma.
-        blobs = [
+        blobs: List[Blob] = [
             (rng.uniform(0, self.width),
              rng.uniform(0, self.height),
              rng.uniform(2.0, 6.0))
             for _ in range(rng.randint(8, 14))
         ]
         #  WAVES: directional sines with random angle/frequency/phase.
-        waves = [
+        waves: List[Wave] = [
             (rng.uniform(0, math.pi),
              rng.uniform(0.08, 0.28),
              rng.uniform(0, 2 * math.pi))
@@ -188,19 +186,19 @@ class TerrainField:
         ]
         return star, blobs, waves
 
-    def _star_value(self, x: float, y: float, p) -> float:
+    def _star_value(self, x: float, y: float, p: StarParams) -> float:
         dx, dy = x - p["cx"], y - p["cy"]
         r = math.hypot(dx, dy)
         theta = math.atan2(dy, dx)
         return 0.5 + 0.5 * math.cos(p["arms"] * theta + p["phase"]) * math.cos(r * p["radial"])
 
-    def _blobs_value(self, x: float, y: float, blobs) -> float:
+    def _blobs_value(self, x: float, y: float, blobs: List[Blob]) -> float:
         return sum(
             math.exp(-((x - bx) ** 2 + (y - by) ** 2) / (2 * sig ** 2))
             for bx, by, sig in blobs
         )
 
-    def _waves_value(self, x: float, y: float, waves) -> float:
+    def _waves_value(self, x: float, y: float, waves: List[Wave]) -> float:
         return sum(
             0.5 + 0.5 * math.sin(
                 2 * math.pi * (x * math.cos(a) + y * math.sin(a)) * f + ph)
@@ -208,7 +206,7 @@ class TerrainField:
         ) / len(waves)
 
     @staticmethod
-    def _normalize(field: List[List[float]]) -> List[List[float]]:
+    def _normalize(field: FloatGrid) -> FloatGrid:
         lo = min(min(row) for row in field)
         hi = max(max(row) for row in field)
         if hi - lo < 1e-9:
@@ -222,7 +220,7 @@ class TerrainField:
             self._heightmap = self._build_heightmap()
         return self._heightmap[x][y]
 
-    def heightmap(self) -> List[List[int]]:
+    def heightmap(self) -> HeightGrid:
         if self.depth <= 1:
             return [[0 for _ in range(self.height)] for _ in range(self.width)]
         if self._heightmap is None:
@@ -242,7 +240,7 @@ class TerrainField:
         fb = [[self._blobs_value(x, y, blobs_p) for y in range(h)] for x in range(w)]
         fw = [[self._waves_value(x, y, waves_p) for y in range(h)] for x in range(w)]
         ns, nb, nw = self._normalize(fs), self._normalize(fb), self._normalize(fw)
-        combined: List[List[float]] = [
+        combined: FloatGrid = [
             [(ns[x][y] + nb[x][y] + nw[x][y]) / 3.0 for y in range(h)]
             for x in range(w)
         ]
@@ -263,7 +261,7 @@ class TerrainField:
     def is_interior(self, x: int, y: int, z: int) -> bool:
         return z < self.height_at(x, y)
 
-    def _build_heightmap(self) -> List[List[int]]:
+    def _build_heightmap(self) -> HeightGrid:
         """Star + blobs + waves -> average -> contrast -> quantization.
 
         No median passes, no peak clipping and no sub-hills: what comes out of
@@ -280,7 +278,7 @@ class TerrainField:
         f_star = self._normalize(f_star)
         f_blobs = self._normalize(f_blobs)
         f_waves = self._normalize(f_waves)
-        raw: List[List[int]] = [[0 for _ in range(self.height)] for _ in range(self.width)]
+        raw: HeightGrid = [[0 for _ in range(self.height)] for _ in range(self.width)]
         for x in range(self.width):
             for y in range(self.height):
                 n = (f_star[x][y] + f_blobs[x][y] + f_waves[x][y]) / 3.0
