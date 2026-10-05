@@ -1,4 +1,3 @@
-import json
 from dataclasses import replace
 from html import escape
 from pathlib import Path
@@ -259,7 +258,8 @@ def _quant_report(e: Dict) -> str:
 
 def _png_b64(img) -> str:
     """PIL image -> base64 data URI."""
-    import base64, io
+    import base64
+    import io
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
@@ -400,7 +400,7 @@ def _map_png(e: Dict, kind: str, scale: int = 10):
     return img
 
 
-def render_html(entries: List[Tuple[Dict,int]], title: str = "Terrenos") -> str:
+def render_html(entries: List[Dict], title: str = "Terrenos") -> str:
     """Self-contained HTML showing the pipeline behind every map.
 
     All visualizations are server-rendered PNGs (no JavaScript needed).
