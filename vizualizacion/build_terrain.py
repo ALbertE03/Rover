@@ -86,6 +86,25 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
                      "interest": poi.interest,
                      "min_visibility": poi.min_visibility})
 
+    # Terrain catalogue: dynamic, so new types in config appear automatically.
+    # Color: from config if present, else deterministic palette by name.
+    _PALETTE = [(74, 124, 89), (201, 162, 39), (107, 114, 128), (31, 41, 55),
+                (180, 80, 80), (80, 140, 180), (140, 80, 180), (180, 140, 80)]
+    cat = []
+    for idx, name in enumerate(sorted(gen.config["terrain"].keys())):
+        spec = gen.config["terrain"][name]
+        if "color" in spec:
+            rgb = _hex(spec["color"])
+        else:
+            rgb = _PALETTE[idx % len(_PALETTE)]
+        cat.append({
+            "name": name,
+            "cost": float(spec["cost"]),
+            "visibility": float(spec["visibility"]),
+            "color": "#%02x%02x%02x" % rgb,
+            "rgb": rgb,
+        })
+
     return {
         "seed": seed, "W": width, "H": height, "depth": depth,
         "noise": nz,
@@ -93,6 +112,7 @@ def pipeline_data(seed: int, width: int = 64, height: int = 64, depth: int = 3,
         "heightmap": hm,
         "terrain": terrain,
         "terrain_mix": mix,
+        "terrain_catalogue": cat,
         "boulders": boulders,
         "height_colors": _height_colors(depth),
         "stations": stations,
@@ -274,8 +294,7 @@ def _map_png(e: Dict, kind: str, scale: int = 10):
                     for b in range(scale):
                         px[i * scale + a, j * scale + b] = c
     elif kind == "terrain":
-        tcol = {"plain": (74, 124, 89), "sand": (201, 162, 39),
-                "rock": (107, 114, 128), "crevasse": (31, 41, 55)}
+        tcol = {t["name"]: t["rgb"] for t in e["terrain_catalogue"]}
         for i in range(W):
             for j in range(H):
                 c = tcol.get(e["terrain"][f"{i},{j}"], (51, 51, 51))
@@ -355,7 +374,11 @@ td.bar span{display:block;height:9px;border-radius:2px;min-width:1px}
         f"#t-{e['seed']}:checked~#sec-{e['seed']}{{display:block}}"
         for e in entries) + """
 .cmp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start}
-.cmp-card .stats{font-size:12px;margin-top:8px;line-height:1.7}
+.cmp-card .stats{font-size:12px;margin-top:8px;line-height:1.7;overflow-wrap:break-word;word-break:break-word}
+.panel,.note,.stats,.legend{overflow-wrap:break-word;word-break:break-word}
+.legend-box{line-height:2.2}
+.leg-item{display:inline-block;margin-right:14px;white-space:nowrap}
+.swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:5px;vertical-align:-2px;border:1px solid rgba(255,255,255,.25)}
 @media(max-width:600px){
   body{padding:10px}
   .tabs label{padding:8px 14px;font-size:13px}
@@ -383,25 +406,36 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
     # ---- Comparison tab (default): final maps side by side + stats ----
     parts.append('<div class="tabsec" id="sec-cmp">')
     parts.append("<h2>Comparaci\u00f3n de terrenos</h2>")
+
+    # Dynamic legend: color per terrain type, from the catalogue.
+    cat = entries[0]["terrain_catalogue"]
+    leg_items = " ".join(
+        f"<span class='leg-item'><span class='swatch' style='background:{t['color']}'></span>"
+        f"{escape(t['name'])} <span class='dim'>(costo {t['cost']:g})</span></span>"
+        for t in cat)
+    parts.append(f"<div class='note legend-box'><b>Leyenda:</b> {leg_items}</div>")
+
     parts.append("<div class='cmp-grid'>")
     for e in entries:
         seed = e["seed"]
         t64 = _png_b64(_map_png(e, "terrain", scale=10))
-        # compact stats for this seed
-        n_cells = e["W"] * e["H"]
-        hdist = " \u00b7 ".join(
-            f"z{z}: {c}" for z, c in enumerate(e["layer_hist"]))
-        tmix = " \u00b7 ".join(
-            f"{k}: {v}" for k, v in sorted(e["terrain_mix"].items()))
+        n = e["W"] * e["H"]
+        # useful stats
+        boulder_pct = 100 * len(e["boulders"]) / n
+        avg_cost = sum(t["cost"] * e["terrain_mix"].get(t["name"], 0)
+                       for t in e["terrain_catalogue"]) / n
+        avg_interest = (sum(p["interest"] for p in e["pois"]) / len(e["pois"])
+                        if e["pois"] else 0)
+        hdist = ", ".join(f"z{z}:{c}" for z, c in enumerate(e["layer_hist"]))
         parts.append(
             f"<div class='panel cmp-card'><h3>Seed {seed}</h3>"
             f"<img class='viz' src='{t64}'>"
             f"<div class='stats'>"
-            f"<div><b>{len(e['boulders'])}</b> rocas \u25b2 \u00b7 "
-            f"<b>{len(e['pois'])}</b> POIs \u00b7 "
-            f"<b>{len(e['stations'])}</b> bases</div>"
+            f"<div>\U0001f9f1 <b>{len(e['boulders'])}</b> rocas ({boulder_pct:.1f}%) \u00b7 "
+            f"\U0001f4cd <b>{len(e['pois'])}</b> POIs "
+            f"(inter\u00e9s medio {avg_interest:.2f})</div>"
+            f"<div>\U0001f4b0 Costo medio de paso: <b>{avg_cost:.2f}</b></div>"
             f"<div class='dim'>Altura \u2014 {hdist}</div>"
-            f"<div class='dim'>Terreno \u2014 {tmix}</div>"
             f"</div></div>")
     parts.append("</div>")
     parts.append('</div>')
@@ -431,6 +465,10 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
         zleg = " ".join(
             f"<span style='color:{c}'>\u25a0</span>z={z}"
             for z, c in enumerate(e["height_colors"]))
+        tleg = " ".join(
+            f"<span class='leg-item'><span class='swatch' style='background:{t['color']}'></span>"
+            f"{escape(t['name'])}</span>"
+            for t in e["terrain_catalogue"])
         bases = [f"<b class='mB'>B</b> {escape(s['id'])}"
                  f"<span class='dim'> ({s['x']},{s['y']},z{s['z']})</span>"
                  for s in e["stations"] if s["main"]]
@@ -446,7 +484,7 @@ Las <b>rocas \u25b2</b> (<code>block_rate={entries[0]["block_rate"]}</code> por 
             f"<div class='note'><b>{len(e['boulders'])} rocas</b> \u00b7 "
             f"{len(e['pois'])} pois \u00b7 {len(e['stations'])} bases \u00b7 "
             f"terrenos: {mix}<br>"
-            f"<span class='legend'>Altura: {zleg}</span>"
+            f"<span class='legend'>Altura: {zleg}<br>Terreno: {tleg}</span>"
             f"<span class='legend feat'>"
             f"{' \u00b7 '.join(bases)}{' \u00b7 '.join(relays)}<br>{poi_list}</span>"
             "</div>")
