@@ -144,10 +144,32 @@ Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
 
 ## 3. El suelo — qué tipo de terreno hay en cada celda
 
-Primero, el Voronoi divide el mapa en `biome_count` regiones: cada celda
-pertenece a la región de su centro más cercano. Cada región tiene su propio
-juego de bandas, sesgado hacia un terreno dominante, para que los tipos se
-agrupen en zonas en vez de salpicarse.
+**El Voronoi: qué hace y por qué.** Antes de asignar ningún terreno, el mapa se
+particiona en `biome_count` regiones: se sortean 3 centros y cada celda pertenece
+a la región de su centro más cercano. Cada región recibe su propio juego de
+bandas, sesgado hacia un terreno dominante —la banda del dominante se ensancha
+robándole ancho a las vecinas—.
+
+¿Por qué este paso? Sin él, el tipo de terreno dependería solo del ruido y el
+mapa saldría moteado: roca, arena y grieta salpicadas sin orden ni zonas. El
+Voronoi le da *geografía* al mapa con una operación barata y determinista: aquí
+una zona arenosa, allá una rocosa. Es la diferencia entre "terreno aleatorio" y
+"terreno que parece un lugar".
+
+Ejemplo real (misma grilla 8×8, semilla 7): centros sorteados en (1.3, 4.3),
+(3.4, 4.5) y (4.0, 5.3), con dominantes arena, llanura y roca. Así queda cada
+celda asignada a su región:
+
+```
+0  0  0  1  1  1  1  1
+0  0  0  1  1  1  1  1
+0  0  0  1  1  1  1  1
+0  0  0  1  1  1  1  2
+0  0  0  1  1  2  2  2
+0  0  0  1  2  2  2  2
+0  0  0  2  2  2  2  2
+0  0  2  2  2  2  2  2
+```
 
 Después, un **ruido multi-octava** asigna un valor a cada celda:
 
