@@ -25,7 +25,8 @@
     "depth_slope": 0.2,
     "terrain_relief_weight": 0.5,
     "relief_amplitude": [
-      1.0,
+      0.3,
+      0.4,
       1.0
     ],
     "noise_octaves": 3,
