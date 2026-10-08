@@ -149,12 +149,12 @@ diagrama de Voronoi: se sortean `biome_count` centros y cada celda cae en la
 región de su centro más cercano. Cada región tiene sus propias bandas, con la
 del terreno dominante ensanchada a costa de las vecinas.
 
-Sin este paso el ruido repartiría roca, arena y grieta al azar por todos lados
+Sin este paso el ruido repartiría terreno rocoso, arena y grieta al azar por todos lados
 y el mapa saldría moteado. Con el Voronoi, cada zona queda dominada por un
 terreno y el mapa tiene regiones reconocibles.
 
 Centros sorteados: (1, 4), (3, 4) y (4, 5), con dominantes arena, llanura y
-roca. Así queda cada celda asignada a su región:
+terreno rocoso. Así queda cada celda asignada a su región:
 
 ```
 0  0  0  1  1  1  1  1
@@ -188,20 +188,20 @@ El valor final suma la pendiente de profundidad y se recorta a [0,1]:
 valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
 ```
 
-A más profundidad, el valor tiende al extremo caro: abajo hay más roca y
+A más profundidad, el valor tiende al extremo caro: abajo hay más terreno rocoso y
 grietas.
 
-El Voronoi y el ruido se combinan así: el Voronoi no coloca terrenos
-directamente, sino que elige con qué regla se mide el valor de cada celda.
-Cada celda tiene su valor `v` en [0,1]; su región decide qué juego de bandas se
-usa, y el terreno es la primera banda cuyo borde supere a `v`. Las bandas
-sesgadas reales del ejemplo:
+El terreno de cada celda sale de juntar las dos piezas: el ruido le da un
+valor `v` en [0,1], y la región Voronoi a la que pertenece decide cómo se lee
+ese valor. Cada región tiene su propio juego de bandas, y el terreno es la
+primera banda cuyo borde supere a `v` — el ruido propone un número y la región
+interpreta qué significa. Las bandas sesgadas reales del ejemplo:
 
-| Región | llanura | arena | roca | grieta |
+| Región | llanura | arena | rocoso | grieta |
 |---|---|---|---|---|
 | 0 (arena) | [0, 0.33) | [0.33, 0.78) | [0.78, 0.88) | [0.88, 1] |
 | 1 (llanura) | [0, 0.62) | [0.62, 0.72) | [0.72, 0.88) | [0.88, 1] |
-| 2 (roca) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
+| 2 (terreno rocoso) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
 
 La banda dominante se ensancha de forma visible: la arena pasa de [0.55, 0.72)
 a [0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
@@ -209,11 +209,11 @@ a [0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
 - Celda (1,1): `v = 0.385`, región 0 → la arena cubre [0.33, 0.78) → **arena**.
   Con las bandas sin sesgar, 0.385 habría sido llanura.
 - Celda (4,4): `v = 0.514`, región 1 → la llanura cubre [0, 0.62) → **llanura**.
-- Celda (6,6): `v = 0.903`, región 2 → la roca cubre [0.65, 0.93) → **roca**.
+- Celda (6,6): `v = 0.903`, región 2 → el terreno rocoso cubre [0.65, 0.93) → **rocoso**.
   Con las bandas sin sesgar, 0.903 habría sido grieta.
 
 Así queda la asignación final en el ejemplo
-(`.` llanura, `:` arena, `#` roca, `/` grieta):
+(`.` llanura, `:` arena, `#` rocoso, `/` grieta):
 
 ```
 :  :  :  .  :  #  #  .
@@ -227,13 +227,13 @@ Así queda la asignación final en el ejemplo
 ```
 
 Se nota el sesgo de cada región: la 0 es casi toda arena (22 de 23 celdas), la 1
-tira a llanura (13 de 22) y la 2 a roca (11 de 19, con 3 grietas).
+tira a llanura (13 de 22) y la 2 a terreno rocoso (11 de 19, con 3 grietas).
 
 | Terreno | Costo | Visibilidad |
 |---|---|---|
 | Llanura | 1.0 | 0.90 |
 | Arena | 1.5 | 0.75 |
-| Roca | 2.2 | 0.60 |
+| Rocoso | 2.2 | 0.60 |
 | Grieta | 3.2 | 0.35 |
 | Lava | ∞ (impasable) | 0.10 |
 

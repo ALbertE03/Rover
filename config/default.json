@@ -15,7 +15,7 @@
       },
       {
         "max": 0.88,
-        "terrain": "rock"
+        "terrain": "rocky"
       },
       {
         "max": 1.0,
@@ -85,7 +85,7 @@
       "glyph": ".",
       "visibility": 0.9
     },
-    "rock": {
+    "rocky": {
       "cost": 2.2,
       "glyph": "#",
       "visibility": 0.6
