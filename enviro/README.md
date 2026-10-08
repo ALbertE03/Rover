@@ -144,11 +144,35 @@ Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
 
 ## 3. El suelo — qué tipo de terreno hay en cada celda
 
-Con la altura decidida, otro ruido (multi-octava, ponderado por eje según
-`axis_weights`) más la pendiente de profundidad deciden el **tipo de suelo**
-según las `bands` del config. Un diagrama de Voronoi (`biome_count` regiones)
-elige qué juego de bandas aplica en cada zona, para que los terrenos se agrupen
-en regiones en vez de salpicarse.
+Primero, el Voronoi divide el mapa en `biome_count` regiones: cada celda
+pertenece a la región de su centro más cercano. Cada región tiene su propio
+juego de bandas, sesgado hacia un terreno dominante, para que los tipos se
+agrupen en zonas en vez de salpicarse.
+
+Después, un **ruido multi-octava** asigna un valor a cada celda:
+
+```
+ruido(x,y) = Σ aᵢ · (wx·tri(x·fᵢ/W) + wy·tri(y·fᵢ/H)) / Σ aᵢ
+tri(p) = |(p mod 2) − 1|        (onda triangular en [0,1])
+a₀ = 1,  aᵢ₊₁ = aᵢ/2            (cada octava aporta la mitad)
+f₀ = noise_scale,  fᵢ₊₁ = 2·fᵢ  (cada octava duplica la frecuencia)
+```
+
+Se suman `noise_octaves` octavas (3 por defecto): la primera dibuja las formas
+grandes y cada siguiente agrega detalle fino con la mitad de fuerza — el truco
+clásico del ruido fractal. `axis_weights` (`wx`, `wy`, suman 1) controla cuánto
+aporta cada eje: con más peso en `x`, las franjas de terreno se alargan a lo
+largo de X.
+
+El valor final suma la pendiente de profundidad y se recorta a [0,1]:
+
+```
+valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
+```
+
+A más profundidad, el valor tiende al extremo caro: abajo hay más roca y
+grietas. Ese valor cae en una banda de la región Voronoi de la celda, y esa
+banda es el terreno.
 
 | Terreno | Costo | Visibilidad |
 |---|---|---|
@@ -184,17 +208,7 @@ Cada POI debe cumplir cuatro reglas:
 
 ## Configuración
 
-Todo vive en `config/default.json`:
-
-| Sección | Controla |
-|---|---|
-| `generation` | ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `mixture_weight_range` (rango de los pesos de cada ruido), `depth_slope`, `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
-| `map` | `width`, `height`, `depth`, `block_rate`, límites `min/max_axis` |
-| `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
-| `network` | `stations`: `(id, radius, signal)` |
-| `poi` | `count`, `min_visibility`, pesos de interés |
-| `rover` | `battery`, `memory` (declarados; el generador no los gasta) |
-| `terrain` | catálogo: `cost`, `visibility`, `glyph` por tipo |
+Todo vive en `config/default.json`, documentado en el [README principal](../README.md).
 
 ## El resultado
 
