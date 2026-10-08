@@ -5,7 +5,6 @@ from ..config import get
 #: Sentinel name for unsurveyed ground. Not a physical terrain.
 UNKNOWN = "unknown"
 
-
 @dataclass(frozen=True)
 class Terrain:
     """Physical traits of one terrain type.
@@ -21,7 +20,6 @@ class Terrain:
     cost: float
     visibility: float
     glyph: str
-
 
 def build_registry(entries: Dict) -> Dict[str, Terrain]:
     """Validate a catalogue definition and key it by name.
@@ -74,10 +72,8 @@ def build_registry(entries: Dict) -> Dict[str, Terrain]:
     registry[UNKNOWN] = Terrain(UNKNOWN, mean, 0.0, "?")
     return registry
 
-
 #: Name to terrain
 TERRAIN: Dict[str, Terrain] = build_registry(get("terrain"))
-
 
 def terrain(name: str) -> Terrain:
     """Look up a terrain by name.
@@ -96,16 +92,7 @@ def terrain(name: str) -> Terrain:
     except KeyError:
         raise KeyError(f"Unknown terrain {name!r}. Available: {sorted(TERRAIN)}") from None
 
-
 def terrain_names() -> List[str]:
     """Declared terrain names, excluding the unsurveyed sentinel."""
     return [name for name in TERRAIN if name != UNKNOWN]
 
-
-def mean_cost() -> float:
-    """Average terrain cost, the prior charged for unsurveyed ground.
-
-    Mean and not median because it is the expectation under a uniform draw,
-    which is the assumption an unexplored cell deserves.
-    """
-    return TERRAIN[UNKNOWN].cost

@@ -3,7 +3,6 @@ from .catalogue import (
     UNKNOWN,
     Terrain,
     build_registry,
-    mean_cost,
     terrain,
     terrain_names,
 )
@@ -65,7 +64,6 @@ __all__ = [
     "cell_id",
     "distance",
     "generate",
-    "mean_cost",
     "movement_offsets",
     "neighbour_offsets",
     "parse_cell_id",

@@ -1,14 +1,13 @@
 import random
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from ..config import load_config,get
 from .catalogue import terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
 from .grid import Cell, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
 from .instance import Map, MapParams
-
 
 MAX_AXIS = get("map").get("max_axis",64) 
 MIN_AXIS = get("map").get("min_axis",5)
@@ -85,7 +84,6 @@ class InstanceParams:
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]
 
-
 class MapGenerator:
     """Builds :class:`~enviro.terrain.instance.Map` instances.
 
@@ -125,39 +123,6 @@ class MapGenerator:
         stations = self._place_stations(cells)
         pois = self._place_pois(cells)
         return Map(self.map_params, cells, stations, pois)
-
-    def create_from_seed(self, seed: int, **overrides: Any) -> Map:
-        """Generate a map for one seed.
-
-        Args:
-            seed: Seed to use.
-            **overrides: Any: Parameter overrides for this call only.
-
-        Returns:
-            A generated map.
-        """
-        return MapGenerator(replace(self.params, seed=seed, **overrides)).create()
-
-    def batch(self, seeds: Iterable[int], **overrides: Any) -> List[Map]:
-        """Generate one map per seed.
-
-        This is what a comparison over instances consumes: a family drawn from
-        a single parameter setting, one per seed.
-
-        Args:
-            seeds: Seeds to draw.
-            **overrides: Any: Parameter overrides applied to every map.
-
-        Returns:
-            One map per seed, in order.
-        """
-        return [self.create_from_seed(seed, **overrides) for seed in seeds]
-
-    def describe(self) -> str:
-        """One line naming the family this generator draws from."""
-        p = self.params
-        return (f"{p.width}x{p.height}x{p.depth} blocks={p.block_rate} "
-                f"pois={p.poi_count} stations={p.station_count} seed={p.seed}")
 
     #  parameters 
 
@@ -494,17 +459,13 @@ class MapGenerator:
                     out.append(c)
         return out
 
-    def __repr__(self) -> str:
-        return f"MapGenerator(seed={self.params.seed})"
-
-
 def generate(seed: int, **overrides: Any) -> Map:
     """Generate one map for a seed.
 
     Example:
         >>> a = generate(42)
         >>> b = generate(42)
-        >>> a.summary() == b.summary()
+        >>> sorted(a.cells) == sorted(b.cells)
         True
     """
     return MapGenerator(InstanceParams.from_config(seed=seed, **overrides)).create()

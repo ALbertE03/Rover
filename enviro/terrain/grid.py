@@ -1,15 +1,13 @@
 from dataclasses import dataclass
 from math import ceil
 from typing import Dict, Optional, Sequence, Tuple
-from .catalogue import UNKNOWN, terrain
+from .catalogue import UNKNOWN
 
 Coord = Tuple[int, int, int]
-
 
 def cell_id(x: int, y: int, z: int) -> str:
     """Deterministic id for a cell, e.g. ``"z01_y04_x09"``."""
     return f"z{z:02d}_y{y:02d}_x{x:02d}"
-
 
 def parse_cell_id(value: str) -> Coord:
     """Recover the position from a cell id.
@@ -25,11 +23,9 @@ def parse_cell_id(value: str) -> Coord:
             f"Malformed cell id {value!r}, expected format 'z00_y00_x00'"
         ) from None
 
-
 def distance(a: Coord, b: Coord) -> float:
     """Euclidean distance between two cells."""
     return sum((p - q) ** 2 for p, q in zip(a, b)) ** 0.5
-
 
 def neighbour_offsets(radius: float) -> Tuple[Coord, ...]:
     """Cell offsets within ``radius`` of the origin, excluding the origin.
@@ -53,7 +49,6 @@ def neighbour_offsets(radius: float) -> Tuple[Coord, ...]:
                     offsets.append(offset)
     return tuple(sorted(offsets))
 
-
 def movement_offsets(radius: float, allow_diagonal: bool = True) -> Tuple[Coord, ...]:
     """Offsets the rover may step to.
 
@@ -71,7 +66,6 @@ def movement_offsets(radius: float, allow_diagonal: bool = True) -> Tuple[Coord,
             if distance(offset, (0, 0, 0)) <= radius:
                 offsets.append(offset)
     return tuple(sorted(offsets))
-
 
 @dataclass
 class Cell:
@@ -96,33 +90,9 @@ class Cell:
     poi_id: Optional[str] = None
 
     @property
-    def surveyed(self) -> bool:
-        """Whether the terrain has been revealed."""
-        return self.terrain != UNKNOWN
-
-    @property
     def traversable(self) -> bool:
         """Whether a boulder blocks the cell."""
         return not self.blocked
-
-    @property
-    def cost(self) -> float:
-        """Cost per grid unit. The catalogue mean while unsurveyed."""
-        return terrain(self.terrain).cost
-
-    @property
-    def visibility(self) -> float:
-        """Survey quality from this ground. Zero while unsurveyed."""
-        return terrain(self.terrain).visibility
-
-    def survey(self) -> None:
-        """Reveal the true terrain."""
-        self.terrain = self.true_terrain
-
-    def __repr__(self) -> str:
-        state = "block" if self.blocked else self.terrain
-        return f"Cell({self.id}, {state})"
-
 
 def reachable_cells(
     cells: Dict[str, Cell],
