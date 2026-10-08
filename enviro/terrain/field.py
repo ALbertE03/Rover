@@ -70,7 +70,6 @@ class TerrainField:
         self.octaves = 1
         self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
         self.bands: List[TerrainBand] = []
-        self.height_contrast = 3.0
         self._heightmap: Optional[HeightGrid] = None
         self._configure(settings if settings is not None else get("generation"))
 
@@ -83,7 +82,6 @@ class TerrainField:
             [(float(b["max"]), str(b["terrain"])) for b in settings.get("bands", [])],
             key=lambda pair: pair[0],
         )
-        self.height_contrast = float(settings.get("height_contrast", 3.0))
         # Biomes: K Voronoi regions, each with bands biased toward a dominant
         # terrain so types cluster into regions instead of scattering.
         self.biome_count = int(settings.get("biome_count", 0))
@@ -120,10 +118,6 @@ class TerrainField:
             raise ValueError(f"generation.axis_weights must sum to 1; got {total}")
         if not 0.0 <= self.depth_slope <= 1.0:
             raise ValueError(f"generation.depth_slope must be in [0, 1], got {self.depth_slope}")
-        if not self.height_contrast > 0.0:
-            raise ValueError(
-                f"generation.height_contrast must be > 0, got {self.height_contrast!r}"
-            )
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
             raise ValueError(f"generation.bands must have distinct 'max' values, got {edges}.")
@@ -180,7 +174,12 @@ class TerrainField:
              rng.uniform(0, 2 * math.pi))
             for _ in range(3)
         ]
-        return star, blobs, waves
+        #  MIX: the seed decides how much each noise contributes, replacing
+        #  the old fixed 1/3 average.
+        raw = [rng.uniform(0.25, 1.0), rng.uniform(0.25, 1.0), rng.uniform(0.25, 1.0)]
+        total = sum(raw)
+        weights = (raw[0] / total, raw[1] / total, raw[2] / total)
+        return star, blobs, waves, weights
 
     def _star_value(self, x: float, y: float, p: StarParams) -> float:
         dx, dy = x - p["cx"], y - p["cy"]
@@ -220,31 +219,31 @@ class TerrainField:
         return z == self.height_at(x, y)
 
     def _build_heightmap(self) -> HeightGrid:
-        """Star + blobs + waves -> average -> contrast -> quantization.
+        """Star + blobs + waves -> seed-weighted mix -> normalize -> quantization.
 
-        No median passes, no peak clipping and no sub-hills: what comes out of
-        the 3 noises is the final terrain.
+        The seed draws both the noise parameters and the mixture weights, so
+        it controls how much each noise contributes. Normalizing the combined
+        field (instead of stretching it with a contrast knob) already spans
+        the full [0, depth-1] range: no median passes, no peak clipping and no
+        sub-hills, what comes out of the 3 noises is the final terrain.
         """
         rng = random.Random(self._noise_seed())
-        star_p, blobs_p, waves_p = self._draw_noise_params(rng)
-        f_star = [[self._star_value(x, y, star_p)
-                   for y in range(self.height)] for x in range(self.width)]
-        f_blobs = [[self._blobs_value(x, y, blobs_p)
-                    for y in range(self.height)] for x in range(self.width)]
-        f_waves = [[self._waves_value(x, y, waves_p)
-                    for y in range(self.height)] for x in range(self.width)]
-        f_star = self._normalize(f_star)
-        f_blobs = self._normalize(f_blobs)
-        f_waves = self._normalize(f_waves)
+        star_p, blobs_p, waves_p, weights = self._draw_noise_params(rng)
+        f_star = self._normalize([[self._star_value(x, y, star_p)
+                                   for y in range(self.height)] for x in range(self.width)])
+        f_blobs = self._normalize([[self._blobs_value(x, y, blobs_p)
+                                    for y in range(self.height)] for x in range(self.width)])
+        f_waves = self._normalize([[self._waves_value(x, y, waves_p)
+                                    for y in range(self.height)] for x in range(self.width)])
+        ws, wb, ww = weights
+        combined = self._normalize(
+            [[ws * f_star[x][y] + wb * f_blobs[x][y] + ww * f_waves[x][y]
+              for y in range(self.height)] for x in range(self.width)]
+        )
         raw: HeightGrid = [[0 for _ in range(self.height)] for _ in range(self.width)]
         for x in range(self.width):
             for y in range(self.height):
-                n = (f_star[x][y] + f_blobs[x][y] + f_waves[x][y]) / 3.0
-                # Contrast: stretch the average around 0.5 so the map uses the
-                # whole [0, depth-1] range.
-                n = 0.5 + (n - 0.5) * self.height_contrast
-                n = max(0.0, min(1.0, n))
-                h = int(n * (self.depth - 1) + 0.5)
+                h = int(combined[x][y] * (self.depth - 1) + 0.5)
                 raw[x][y] = max(0, min(self.depth - 1, h))
         return raw
 
