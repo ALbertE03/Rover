@@ -189,7 +189,19 @@ valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
 ```
 
 A más profundidad, el valor tiende al extremo caro: abajo hay más terreno rocoso y
-grietas.
+grietas. Así quedan los valores en el ejemplo (superficie, con la pendiente de
+profundidad ya sumada):
+
+```
+ 0.44  0.46  0.44  0.56  0.63  0.78  0.74  0.61
+ 0.37  0.38  0.47  0.48  0.56  0.71  0.67  0.54
+ 0.33  0.34  0.43  0.44  0.51  0.67  0.63  0.50
+ 0.37  0.48  0.47  0.58  0.56  0.71  0.67  0.64
+ 0.43  0.44  0.43  0.44  0.51  0.67  0.63  0.60
+ 0.40  0.51  0.50  0.51  0.59  0.74  0.70  0.67
+ 0.50  0.52  0.50  0.62  0.69  0.94  0.90  0.67
+ 0.73  0.74  0.73  0.74  0.81  1.00  1.00  0.90
+```
 
 El terreno de cada celda sale de juntar las dos piezas: el ruido le da un
 valor `v` en [0,1], y la región Voronoi a la que pertenece decide cómo se lee
