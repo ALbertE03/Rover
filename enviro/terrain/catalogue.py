@@ -10,7 +10,7 @@ class Terrain:
     """Physical traits of one terrain type.
 
     Attributes:
-        name: Registry key, e.g. ``"rock"``.
+        name: Registry key, e.g. ``"rocky"``.
         cost: Energy per grid unit travelled. Strictly positive, so crossing
             ground always costs something.
         visibility: Survey quality from this ground, in (0, 1].
