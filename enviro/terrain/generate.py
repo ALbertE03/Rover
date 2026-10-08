@@ -30,7 +30,8 @@ class InstanceParams:
         station_count: Stations to place (>= 1). They spread by farthest-point
             fill: first random, each next as far as possible from the placed
             ones, so extra bases actually cover new ground.
-        seed: Seed for the whole instance. None means an unseeded map.
+        seed: Seed for the whole instance. None means an unseeded map: the
+            generator draws a random seed at construction and records it.
         config_path: Alternate configuration file.
     """
     width: int = 12
@@ -99,6 +100,11 @@ class MapGenerator:
         self.params = params or InstanceParams.from_config()
         if seed is not None:
             self.params = replace(self.params, seed=seed)
+        if self.params.seed is None:
+            # Unseeded map: draw a concrete seed so every downstream draw
+            # (biome centers, noise parameters, placement) has something
+            # deterministic to work with. The drawn seed stays on params.
+            self.params = replace(self.params, seed=random.randint(0, 2**32 - 1))
         self.config = load_config(self.params.config_path)
         self.rng = random.Random(self.params.seed)
         self.field = self._build_field()
