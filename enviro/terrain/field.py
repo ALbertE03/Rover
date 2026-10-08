@@ -70,6 +70,7 @@ class TerrainField:
         self.octaves = 1
         self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
         self.bands: List[TerrainBand] = []
+        self.mixture_weight_range: Tuple[float, float] = (0.25, 1.0)
         self._heightmap: Optional[HeightGrid] = None
         self._configure(settings if settings is not None else get("generation"))
 
@@ -78,6 +79,8 @@ class TerrainField:
         self.octaves = settings.get("noise_octaves", 3)
         self.weights = dict(settings.get("axis_weights", {"x": 0.5, "y": 0.5}))
         self.depth_slope = float(settings.get("depth_slope", 0.0))
+        lo, hi = settings.get("mixture_weight_range", [0.25, 1.0])
+        self.mixture_weight_range = (float(lo), float(hi))
         self.bands = sorted(
             [(float(b["max"]), str(b["terrain"])) for b in settings.get("bands", [])],
             key=lambda pair: pair[0],
@@ -118,6 +121,11 @@ class TerrainField:
             raise ValueError(f"generation.axis_weights must sum to 1; got {total}")
         if not 0.0 <= self.depth_slope <= 1.0:
             raise ValueError(f"generation.depth_slope must be in [0, 1], got {self.depth_slope}")
+        lo, hi = self.mixture_weight_range
+        if not 0.0 <= lo <= hi or not hi > 0.0:
+            raise ValueError(
+                f"generation.mixture_weight_range must satisfy 0 <= lo <= hi with hi > 0, got {(lo, hi)}."
+            )
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
             raise ValueError(f"generation.bands must have distinct 'max' values, got {edges}.")
@@ -174,9 +182,11 @@ class TerrainField:
              rng.uniform(0, 2 * math.pi))
             for _ in range(3)
         ]
-        #  MIX: the seed decides how much each noise contributes, replacing
-        #  the old fixed 1/3 average.
-        raw = [rng.uniform(0.25, 1.0), rng.uniform(0.25, 1.0), rng.uniform(0.25, 1.0)]
+        #  MIX: the seed decides how much each noise contributes. The range
+        #  comes from the config; the lower bound keeps every noise in the
+        #  mix so none ever disappears entirely.
+        lo, hi = self.mixture_weight_range
+        raw = [rng.uniform(lo, hi), rng.uniform(lo, hi), rng.uniform(lo, hi)]
         total = sum(raw)
         weights = (raw[0] / total, raw[1] / total, raw[2] / total)
         return star, blobs, waves, weights

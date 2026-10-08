@@ -47,15 +47,17 @@ valor = promedio de [ 0.5 + 0.5·sin( 2π·(x·cos α + y·sin α)·f + φ ) ]
 
 La semilla sortea: 3 ondas, cada una con ángulo `α`, frecuencia `f` y fase `φ`.
 
-Además la semilla sortea **cuánto aporta cada ruido**: 3 pesos que suman 1.
+Además la semilla sortea **cuánto aporta cada ruido**: 3 pesos en el rango
+`mixture_weight_range` del config (por defecto [0.25, 1.0]) que suman 1. El
+mínimo 0.25 garantiza que ningún ruido desaparezca nunca del todo.
 
 ## 2. Ejemplo real, paso a paso
 
 Semilla 7, grilla 8×8, `depth = 3`. Pesos sorteados:
 estrella = 0.18, manchas = 0.39, ondas = 0.43.
 
-**Paso 1 — cada ruido se normaliza a [0,1].** Decisión: así los tres campos son
-comparables antes de mezclarlos; ninguno domina solo por su escala natural.
+**Paso 1 — cada ruido se normaliza a [0,1]**, así los tres campos son
+comparables antes de mezclarlos y ninguno domina solo por su escala natural.
 
 Ruido estrella normalizado:
 
@@ -97,9 +99,9 @@ Ruido ondas normalizado:
 ```
 
 **Paso 2 — mezcla ponderada con los pesos de la semilla y normalización del
-combinado.** Decisión: normalizar *después* de mezclar (no cada ruido por
-separado) hace que el mínimo real quede exactamente en 0.0 y el máximo en 1.0.
-Por construcción, el mapa siempre usa todo el rango de alturas.
+combinado.** Al normalizar *después* de mezclar (no cada ruido por
+separado), el mínimo real queda exactamente en 0.0 y el máximo en 1.0:
+por construcción, el mapa siempre usa todo el rango de alturas.
 
 ```
 combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar a [0,1]
@@ -116,8 +118,8 @@ combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar 
  0.27  0.27  0.36  0.54  0.71  0.78  1.00  0.77
 ```
 
-**Paso 3 — cuantización a capas `z`.** Decisión: `z = round(v · (n−1))` con
-`n = depth`. Cada capa se lleva el rango de valores que redondea hacia ella:
+**Paso 3 — cuantización a capas `z`** con `z = round(v · (n−1))`, `n = depth`.
+Cada capa se lleva el rango de valores que redondea hacia ella:
 
 | z | rango de v |
 |---|---|
@@ -186,7 +188,7 @@ Todo vive en `config/default.json`:
 
 | Sección | Controla |
 |---|---|
-| `generation` | ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `depth_slope`, `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
+| `generation` | ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `mixture_weight_range` (rango de los pesos de cada ruido), `depth_slope`, `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
 | `map` | `width`, `height`, `depth`, `block_rate`, límites `min/max_axis` |
 | `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
 | `network` | `stations`: `(id, radius, signal)` |
