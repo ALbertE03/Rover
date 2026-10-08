@@ -101,10 +101,11 @@ Ruido ondas normalizado:
 **Paso 2 — mezcla ponderada con los pesos de la semilla y normalización del
 combinado.** Al normalizar *después* de mezclar (no cada ruido por
 separado), el mínimo real queda exactamente en 0.0 y el máximo en 1.0.
-Después `relief_amplitude` (1.0 por defecto) reescala el relieve alrededor de
-su media: con 1.0 el mapa usa todo el rango de alturas; al bajarlo, el relieve
-se aplana y el mapa puede no tocar todas las capas (con 0.0 es una planicie a
-la altura media).
+Después la semilla sortea `relief_amplitude` en el rango del config
+(`[1.0, 1.0]` por defecto) y reescala el relieve alrededor de su media: con
+1.0 el mapa usa todo el rango de alturas; con valores menores el relieve se
+aplana y el mapa puede no tocar todas las capas (con 0.0 es una planicie a la
+altura media). Así conviven mapas que llegan al máximo y mapas que no.
 
 ```
 combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar a [0,1]

@@ -56,9 +56,9 @@ class TerrainField:
         depth_slope: How much deeper cells trend toward the expensive end.
         terrain_relief_weight: How much the column's relief steers the
             terrain type (0 = noise only, 1 = relief only).
-        relief_amplitude: Fraction of the normalized relief range kept,
-            scaled around its mean (1.0 = full depth range always in play,
-            0 = flat plain at the mean height).
+        relief_amplitude_range: Range the seed draws the relief amplitude
+            from, scaled around the relief mean ([1.0, 1.0] = full depth
+            range always in play; lower values allow flatter maps).
     """
 
     def __init__(
@@ -75,7 +75,7 @@ class TerrainField:
         self.origin = origin
         self.depth_slope = 0.0
         self.terrain_relief_weight = 0.0
-        self.relief_amplitude = 1.0
+        self.relief_amplitude_range: Tuple[float, float] = (1.0, 1.0)
         self.scale = 1
         self.octaves = 1
         self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
@@ -91,7 +91,11 @@ class TerrainField:
         self.weights = dict(settings.get("axis_weights", {"x": 0.5, "y": 0.5}))
         self.depth_slope = float(settings.get("depth_slope", 0.0))
         self.terrain_relief_weight = float(settings.get("terrain_relief_weight", 0.0))
-        self.relief_amplitude = float(settings.get("relief_amplitude", 1.0))
+        raw_amp = settings.get("relief_amplitude", [1.0, 1.0])
+        if isinstance(raw_amp, (int, float)):
+            raw_amp = [raw_amp, raw_amp]
+        lo, hi = raw_amp
+        self.relief_amplitude_range = (float(lo), float(hi))
         lo, hi = settings.get("mixture_weight_range", [0.25, 1.0])
         self.mixture_weight_range = (float(lo), float(hi))
         self.bands = sorted(
@@ -138,9 +142,11 @@ class TerrainField:
             raise ValueError(
                 f"generation.terrain_relief_weight must be in [0, 1], got {self.terrain_relief_weight}"
             )
-        if not 0.0 <= self.relief_amplitude <= 1.0:
+        lo, hi = self.relief_amplitude_range
+        if not 0.0 <= lo <= hi <= 1.0:
             raise ValueError(
-                f"generation.relief_amplitude must be in [0, 1], got {self.relief_amplitude}"
+                f"generation.relief_amplitude must satisfy 0 <= lo <= hi <= 1, "
+                f"got {(lo, hi)}."
             )
         lo, hi = self.mixture_weight_range
         if not 0.0 <= lo <= hi or not hi > 0.0:
@@ -250,9 +256,9 @@ class TerrainField:
 
         The seed draws both the noise parameters and the mixture weights, so
         it controls how much each noise contributes. Normalizing the combined
-        field spans the full [0, 1] range; ``relief_amplitude`` then scales it
-        back around its mean, so 1.0 keeps the whole depth range in play and
-        lower values make flatter maps. What comes out of the 3 noises is the
+        field spans the full [0, 1] range; the drawn ``relief_amplitude`` then
+        scales it back around its mean, so some maps use the whole depth
+        range and others stay flatter. What comes out of the 3 noises is the
         final terrain.
         """
         rng = random.Random(self._noise_seed())
@@ -268,7 +274,10 @@ class TerrainField:
             [[ws * f_star[x][y] + wb * f_blobs[x][y] + ww * f_waves[x][y]
               for y in range(self.height)] for x in range(self.width)]
         )
-        amp = self.relief_amplitude
+        amp_lo, amp_hi = self.relief_amplitude_range
+        # Own stream so the amplitude draw never shifts the noise draws:
+        # existing seeds keep their relief shape.
+        amp = random.Random(self._noise_seed() ^ 0x9E3779B9).uniform(amp_lo, amp_hi)
         if amp < 1.0:
             # Shrink the relief around its mean: the map no longer has to
             # touch every layer. amp = 0 is a flat plain at the mean height.
