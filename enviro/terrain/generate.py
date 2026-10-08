@@ -29,7 +29,8 @@ class InstanceParams:
         poi_count: Number of points of interest.
         station_count: Stations to place (>= 1). They spread by farthest-point
             fill: first random, each next as far as possible from the placed
-            ones, so extra bases actually cover new ground.
+            ones, so extra bases actually cover new ground. Past the
+            configured presets, the last preset is repeated.
         seed: Seed for the whole instance. None means an unseeded map: the
             generator draws a random seed at construction and records it.
         config_path: Alternate configuration file.
@@ -153,9 +154,16 @@ class MapGenerator:
         movement = self.config["movement"]
         poi = self.config["poi"]
         rover = self.config["rover"]
+        presets = list(self.config["network"]["stations"])
+        if presets:
+            # More stations than presets: repeat the last one (the relay),
+            # so extra stations extend the network instead of silently
+            # disappearing into the slice.
+            while len(presets) < self.params.station_count:
+                presets.append(presets[-1])
         stations = tuple(
             (str(s["id"]), float(s["radius"]), float(s["signal"]))
-            for s in self.config["network"]["stations"][: self.params.station_count]
+            for s in presets[: self.params.station_count]
         )
         return MapParams(
             width=self.params.width,
