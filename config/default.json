@@ -24,6 +24,7 @@
     ],
     "depth_slope": 0.2,
     "terrain_relief_weight": 0.5,
+    "relief_amplitude": 1.0,
     "noise_octaves": 3,
     "noise_scale": 2,
     "mixture_weight_range": [

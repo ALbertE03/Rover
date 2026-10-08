@@ -24,7 +24,7 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 
 | Sección | Qué controla |
 |---|---|
-| `generation` | Ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `mixture_weight_range` (rango de los pesos de cada ruido), `depth_slope`, `terrain_relief_weight` (correlación altura–terreno), `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
+| `generation` | Ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `mixture_weight_range` (rango de los pesos de cada ruido), `depth_slope`, `terrain_relief_weight` (correlación altura–terreno), `relief_amplitude` (cuánto rango de altura usa el relieve), `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
 | `map` | `width`, `height`, `depth`, `block_rate`, límites `min/max_axis` |
 | `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
 | `network` | `stations`: lista de `(id, radius, signal)` |

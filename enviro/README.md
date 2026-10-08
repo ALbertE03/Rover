@@ -100,8 +100,11 @@ Ruido ondas normalizado:
 
 **Paso 2 — mezcla ponderada con los pesos de la semilla y normalización del
 combinado.** Al normalizar *después* de mezclar (no cada ruido por
-separado), el mínimo real queda exactamente en 0.0 y el máximo en 1.0:
-por construcción, el mapa siempre usa todo el rango de alturas.
+separado), el mínimo real queda exactamente en 0.0 y el máximo en 1.0.
+Después `relief_amplitude` (1.0 por defecto) reescala el relieve alrededor de
+su media: con 1.0 el mapa usa todo el rango de alturas; al bajarlo, el relieve
+se aplana y el mapa puede no tocar todas las capas (con 0.0 es una planicie a
+la altura media).
 
 ```
 combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar a [0,1]
@@ -127,7 +130,8 @@ Cada capa se lleva el rango de valores que redondea hacia ella:
 | k (1 ≤ k ≤ n−2) | [(k−0.5)/(n−1), (k+0.5)/(n−1)) |
 | n−1 | [1 − 0.5/(n−1), 1] |
 
-Como el combinado siempre toca 0.0 y 1.0, el z máximo siempre se alcanza.
+Con la amplitud por defecto (1.0) el combinado toca 0.0 y 1.0, así que el z
+máximo siempre se alcanza.
 
 Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
 
