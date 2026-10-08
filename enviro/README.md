@@ -1,121 +1,98 @@
-# Generación de terrenos — `enviro`
+# Generación de terrenos
 
-Este paquete genera mapas 3D sintéticos para simular un rover explorador.
-Todo el proceso es determinista: la misma semilla produce siempre el mismo mapa.
-
-Punto de entrada:
+Generador determinista de mapas 3D para simular un rover explorador.
+La misma semilla produce siempre el mismo mapa.
 
 ```python
 from enviro.terrain import generate
 
-mapa = generate(42)          # mapa 12x12x3 con el config por defecto
-mapa = generate(42, depth=10, width=32, height=32)  # con overrides
+mapa = generate(42)
 ```
 
-El objeto devuelto (`Map`) es un contenedor puro de datos: `cells`, `params`, `pois`, `stations`.
+## El pipeline
+
+```
+semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶ red ─▶ objetivos ─▶ mapa
+```
 
 ---
 
-## Paso 0 — Parámetros de la instancia
+## 1. Los 3 ruidos — el relieve
 
-`generate(seed)` llama a `InstanceParams.from_config()`, que lee `config/default.json`
-y extrae lo que varía entre instancias: `map.width/height/depth`, `map.block_rate`,
-`poi.count` y `station_count` (= número de presets en `network.stations`).
-`__post_init__` valida rangos (tamaño dentro de `min/max_axis`, `block_rate` en [0,1]…).
-La idea: la familia de mapas queda definida por el archivo de config, no por
-argumentos sueltos.
+El relieve nace de tres campos de ruido 2D que se evalúan en cada celda `(x, y)`:
 
-## Paso 1 — El campo de terreno (`TerrainField`)
+| Ruido | Dibuja | Lo sortea la semilla |
+|---|---|---|
+| ⭐ Estrella | brazos radiales desde un centro | centro, nº de brazos (3–5), fase, atenuación |
+| 🫧 Manchas | colinas gaussianas | 8–14 centros y sigmas |
+| 🌊 Ondas | dunas direccionales | 3 senos: ángulo, frecuencia, fase |
 
-`MapGenerator._build_field()` sortea el *origin* — un desfase de fase con
-`rng.uniform()` — que es la influencia directa de la semilla sobre el terreno.
-Con él se crea el `TerrainField`, que en `_configure()` lee la sección
-`generation`: `noise_scale`, `noise_octaves`, `axis_weights` (validado: claves
-`x`,`y` que suman 1), `depth_slope`, `bands` y `biome_count` (centros Voronoi
-con bandas sesgadas a un terreno dominante vía `_biased_bands()`, para que los
-terrenos se agrupen en regiones).
+La semilla también decide **cuánto aporta cada ruido**: sortea 3 pesos que suman 1
+(en vez del antiguo promedio fijo). Cada campo se normaliza a [0,1], se mezclan
+con esos pesos y **el combinado se normaliza de nuevo**. Al normalizar después de
+mezclar, el mínimo queda exactamente en 0 y el máximo en 1 *por construcción*,
+así que la cuantización a capas `z` **siempre alcanza el z máximo**, sin trucos
+de contraste. Finalmente se redondea a la capa entera más cercana.
 
-## Paso 2 — Heightmap: los 3 ruidos
+> Del determinismo se encarga el diseño: cada `create()` re-siembra el RNG y
+> reconstruye el campo, así que el mismo generador entrega el mismo mapa siempre.
 
-`_place_terrain()` pide `height_at(x, y)`, que construye el heightmap una sola
-vez (`_build_heightmap()`, con caché):
+## 2. El suelo — qué tipo de terreno hay en cada celda
 
-1. `_noise_seed()` deriva un entero del *origin* (o sea, de la semilla).
-2. `_draw_noise_params()` sortea, todo de la semilla:
-   - **estrella**: centro, nº de brazos (3–5), fase y atenuación radial;
-   - **manchas**: 8–14 gaussianas con centro y sigma aleatorios;
-   - **ondas**: 3 senos direccionales con ángulo, frecuencia y fase aleatorios;
-   - **mezcla**: 3 pesos (0.25–1.0) normalizados a sumar 1 — la semilla decide
-     cuánto aporta cada ruido, en vez de un promedio fijo.
-3. Se evalúan `_star_value()`, `_blobs_value()` y `_waves_value()` en cada celda
-   y cada campo se normaliza a [0,1] con `_normalize()`.
-4. Se mezclan con los pesos de la semilla y **el combinado se normaliza** a [0,1].
-   Al normalizar después de mezclar, el mínimo real queda en 0.0 y el máximo en
-   1.0 por construcción, así que la cuantización `round(valor × (depth-1))`
-   **siempre alcanza el z máximo**, sin necesidad de ningún contraste.
-5. Se cuantiza a capas `z` en `[0, depth-1]`.
+Con la altura ya decidida, otro ruido (multi-octava, ponderado por eje según
+`axis_weights`) más la pendiente de profundidad deciden el **tipo de suelo**:
+llanura, arena, roca o grieta, según las `bands` del config. Un diagrama de
+Voronoi (`biome_count` regiones) elige qué juego de bandas aplica en cada zona,
+para que los terrenos se agrupen en regiones en vez de salpicarse.
 
-## Paso 3 — Tipo de terreno por celda
+| Terreno | Costo | Visibilidad |
+|---|---|---|
+| Llanura | 1.0 | 0.90 |
+| Arena | 1.5 | 0.75 |
+| Roca | 2.2 | 0.60 |
+| Grieta | 3.2 | 0.35 |
+| Lava | ∞ (impasable) | 0.10 |
 
-Por cada columna `(x, y)` con altura `h`:
-- `z > h`: aire, no se crea celda;
-- `z == h`: superficie transitable;
-- `z < h`: interior sólido del cerro, bloqueado.
+## 3. Obstáculos — rocas y lava
 
-`terrain_at(x, y, z)` calcula `value()` = `_noise()` (ruido multi-octava donde
-`axis_weights` pondera cuánto aporta cada eje, vía `_wave()`) más
-`depth_slope × (z / z_max)`, elige el bioma con `biome_at()` (Voronoi al centro
-más cercano) y devuelve el primer terreno cuya banda lo contenga.
-O sea: el heightmap decide la **altura**, este ruido decide el **tipo de suelo**.
+- **Rocas**: cada celda de superficie se bloquea con probabilidad `block_rate`.
+- **Lava**: se inundan `lava_pools` pozos circulares (centro y radio aleatorios);
+  toda celda alcanzada se vuelve lava impasable. Corre después de las rocas para
+  sobreescribirlas.
 
-## Paso 4 — Rocas (`_place_boulders`)
+## 4. La red — estaciones
 
-Cada celda de superficie (`is_surface()`) se bloquea con probabilidad
-`block_rate`. Solo la superficie puede llevar rocas: el interior ya es sólido
-y el aire no existe como celda.
+Los presets de `network.stations` (`id`, `radio`, `señal`) se colocan sobre la
+superficie con *farthest-point*: la primera al azar, cada siguiente lo más lejos
+posible de las anteriores. El radio se capa a la diagonal del mapa. Radio 0 =
+estación puntual: hay que pararse en su celda.
 
-## Paso 5 — Lava (`_place_lava_pools`)
+## 5. Los objetivos — puntos de interés
 
-Se inundan `lava_pools` pozos circulares: centro y radio (`lava_pool_radius`)
-aleatorios; toda celda de superficie dentro del radio pasa a `true_terrain =
-"lava"` y se bloquea (impasable). Corre después de las rocas para
-sobreescribirlas.
+Cada POI debe cumplir cuatro reglas:
 
-## Paso 6 — Estaciones (`_place_stations`)
+1. **Alcanzable** — se llega desde la superficie sin cruzar rocas.
+2. **Observable** — alguna celda vecina tiene visibilidad ≥ `min_visibility`.
+3. **Interesante** — cuesta llegar (altura, terreno caro) pero premia (más altura
+   = más radio de exploración).
+4. **Disperso** — uno por capa primero; los empates se rompen por lejanía.
 
-Se toman los presets de `network.stations` (`id`, `radius`, `signal`) y se
-colocan sobre la superficie con *farthest-point*: la primera al azar, cada
-siguiente lo más lejos posible de las ya colocadas. `place_stations()` capa
-cada radio a la diagonal del mapa, porque un radio mayor que el mundo no aporta
-cobertura distinguible. Radio 0 = estación puntual (hay que pararse en su celda).
+## Configuración
 
-## Paso 7 — Puntos de interés (`_place_pois`)
+Todo vive en `config/default.json`:
 
-Cuatro reglas, en orden:
+| Sección | Controla |
+|---|---|
+| `generation` | ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `depth_slope`, `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
+| `map` | `width`, `height`, `depth`, `block_rate`, límites `min/max_axis` |
+| `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
+| `network` | `stations`: `(id, radius, signal)` |
+| `poi` | `count`, `min_visibility`, pesos de interés |
+| `rover` | `battery`, `memory` (declarados; el generador no los gasta) |
+| `terrain` | catálogo: `cost`, `visibility`, `glyph` por tipo |
 
-1. **Alcanzable**: `_observable_cells()` hace flood fill (`reachable_cells()`)
-   desde la superficie con los pasos de `movement_offsets()`.
-2. **Observable**: alguna celda vecina tiene visibilidad ≥ `poi.min_visibility`
-   (se usa el terreno real, nada está explorado aún).
-3. **Interesante**: `_interest()` puntúa cada candidato —
-   `peso_subida × altura_normalizada + peso_suelo × costo_terreno_normalizado`.
-   Subir cuesta pero premia con más radio de exploración.
-4. **Disperso**: una POI por capa primero (las capas compiten por interés con
-   `_best()`), desempates por lejanía (`_farthest()`), y relleno con
-   `_best_spread()` (50% interés + 50% distancia a las ya colocadas).
+## El resultado
 
-## Resultado
-
-`Map(params, cells, stations, pois)` empaqueta todo. `params` es el spec
-congelado (`MapParams`: movimiento, POIs, estaciones, batería, memoria);
-`cells` es el diccionario de celdas por id (`"z01_y04_x09"`).
-
-## Notas de diseño
-
-- **Determinismo**: `create()` re-siembras el RNG y reconstruye el campo en
-  cada llamada, así que el mismo generador entrega el mismo mapa siempre.
-- **Separación de concerns**: relieve (heightmap), tipo de suelo (bandas +
-  biomas), obstáculos (rocas/lava), red (estaciones) y objetivos (POIs) son
-  etapas independientes; un experimento puede variar una sin tocar las demás.
-- La configuración vive en `config/default.json`; ver el README principal para
-  el detalle de cada clave.
+`generate()` devuelve un `Map`: un contenedor puro de datos con `cells`
+(diccionario por id `"z01_y04_x09"`), `params` (el spec congelado), `pois` y
+`stations`. Sin métodos: lo generas, lo lees.
