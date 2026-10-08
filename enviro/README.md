@@ -19,31 +19,135 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 
 ## 1. Los 3 ruidos — el relieve
 
-El relieve nace de tres campos de ruido 2D que se evalúan en cada celda `(x, y)`:
+El relieve nace de tres campos de ruido 2D. Cada uno tiene su fórmula y sus
+parámetros, todos sorteados por la semilla:
 
-| Ruido | Dibuja | Lo sortea la semilla |
-|---|---|---|
-| ⭐ Estrella | brazos radiales desde un centro | centro, nº de brazos (3–5), fase, atenuación |
-| 🫧 Manchas | colinas gaussianas | 8–14 centros y sigmas |
-| 🌊 Ondas | dunas direccionales | 3 senos: ángulo, frecuencia, fase |
+**Estrella** — brazos radiales desde un centro sorteado `(cx, cy)`:
 
-La semilla también decide **cuánto aporta cada ruido**: sortea 3 pesos que suman 1
-(en vez del antiguo promedio fijo). Cada campo se normaliza a [0,1], se mezclan
-con esos pesos y **el combinado se normaliza de nuevo**. Al normalizar después de
-mezclar, el mínimo queda exactamente en 0 y el máximo en 1 *por construcción*,
-así que la cuantización a capas `z` **siempre alcanza el z máximo**, sin trucos
-de contraste. Finalmente se redondea a la capa entera más cercana.
+```
+valor = 0.5 + 0.5 · cos(brazos·θ + fase) · cos(r·radial)
+r = √(dx² + dy²),  θ = atan2(dy, dx),  (dx,dy) = distancia al centro
+```
 
-> Del determinismo se encarga el diseño: cada `create()` re-siembra el RNG y
-> reconstruye el campo, así que el mismo generador entrega el mismo mapa siempre.
+La semilla sortea: centro, nº de brazos (3–5), fase y atenuación radial.
 
-## 2. El suelo — qué tipo de terreno hay en cada celda
+**Manchas** — suma de gaussianas:
 
-Con la altura ya decidida, otro ruido (multi-octava, ponderado por eje según
-`axis_weights`) más la pendiente de profundidad deciden el **tipo de suelo**:
-llanura, arena, roca o grieta, según las `bands` del config. Un diagrama de
-Voronoi (`biome_count` regiones) elige qué juego de bandas aplica en cada zona,
-para que los terrenos se agrupen en regiones en vez de salpicarse.
+```
+valor = Σ exp( −((x−bx)² + (y−by)²) / (2σ²) )
+```
+
+La semilla sortea: 8–14 manchas, cada una con centro `(bx, by)` y sigma.
+
+**Ondas** — promedio de senos direccionales:
+
+```
+valor = promedio de [ 0.5 + 0.5·sin( 2π·(x·cos α + y·sin α)·f + φ ) ]
+```
+
+La semilla sortea: 3 ondas, cada una con ángulo `α`, frecuencia `f` y fase `φ`.
+
+Además la semilla sortea **cuánto aporta cada ruido**: 3 pesos que suman 1.
+
+## 2. Ejemplo real, paso a paso
+
+Semilla 7, grilla 8×8, `depth = 3`. Pesos sorteados:
+estrella = 0.18, manchas = 0.39, ondas = 0.43.
+
+**Paso 1 — cada ruido se normaliza a [0,1].** Decisión: así los tres campos son
+comparables antes de mezclarlos; ninguno domina solo por su escala natural.
+
+Ruido estrella normalizado:
+
+```
+ 0.40  0.52  0.61  0.65  0.65  0.63  0.60  0.58
+ 0.33  0.45  0.53  0.55  0.52  0.47  0.46  0.50
+ 0.30  0.43  0.51  0.52  0.44  0.33  0.32  0.45
+ 0.32  0.46  0.56  0.58  0.46  0.24  0.20  0.47
+ 0.36  0.51  0.65  0.73  0.65  0.29  0.09  0.63
+ 0.42  0.55  0.70  0.85  0.94  0.75  0.00  1.00
+ 0.47  0.55  0.63  0.69  0.74  0.76  0.44  0.20
+ 0.52  0.52  0.49  0.40  0.21  0.03  0.86  0.52
+```
+
+Ruido manchas normalizado:
+
+```
+ 0.01  0.12  0.22  0.33  0.43  0.51  0.56  0.55
+ 0.07  0.21  0.34  0.48  0.60  0.70  0.76  0.75
+ 0.12  0.28  0.44  0.60  0.75  0.86  0.91  0.88
+ 0.15  0.32  0.51  0.69  0.84  0.95  0.99  0.94
+ 0.15  0.33  0.52  0.71  0.87  0.97  1.00  0.94
+ 0.12  0.30  0.49  0.68  0.83  0.93  0.94  0.88
+ 0.07  0.23  0.41  0.59  0.73  0.82  0.83  0.78
+ 0.00  0.15  0.31  0.46  0.58  0.67  0.69  0.65
+```
+
+Ruido ondas normalizado:
+
+```
+ 0.52  0.34  0.26  0.34  0.52  0.66  0.64  0.48
+ 0.37  0.28  0.35  0.51  0.63  0.60  0.44  0.25
+ 0.24  0.33  0.52  0.66  0.65  0.51  0.35  0.31
+ 0.40  0.60  0.75  0.74  0.60  0.44  0.40  0.52
+ 0.57  0.68  0.64  0.46  0.28  0.21  0.30  0.46
+ 0.49  0.43  0.24  0.06  0.00  0.10  0.28  0.38
+ 0.50  0.34  0.19  0.18  0.32  0.53  0.67  0.64
+ 0.66  0.52  0.53  0.68  0.88  1.00  0.95  0.79
+```
+
+**Paso 2 — mezcla ponderada con los pesos de la semilla y normalización del
+combinado.** Decisión: normalizar *después* de mezclar (no cada ruido por
+separado) hace que el mínimo real quede exactamente en 0.0 y el máximo en 1.0.
+Por construcción, el mapa siempre usa todo el rango de alturas.
+
+```
+combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar a [0,1]
+```
+
+```
+ 0.15  0.13  0.17  0.30  0.49  0.62  0.64  0.51
+ 0.07  0.12  0.28  0.48  0.63  0.66  0.58  0.45
+ 0.00  0.20  0.45  0.65  0.71  0.65  0.57  0.57
+ 0.13  0.42  0.66  0.78  0.74  0.64  0.63  0.76
+ 0.26  0.49  0.63  0.65  0.60  0.51  0.53  0.76
+ 0.21  0.31  0.35  0.38  0.46  0.54  0.46  0.77
+ 0.19  0.21  0.24  0.36  0.56  0.77  0.78  0.66
+ 0.27  0.27  0.36  0.54  0.71  0.78  1.00  0.77
+```
+
+**Paso 3 — cuantización a capas `z`.** Decisión: `z = round(v · (depth−1))`.
+Cada capa se lleva el rango de valores que redondea hacia ella. Para `depth = 3`:
+
+| z | rango de v |
+|---|---|
+| 0 | [0.00, 0.25) |
+| 1 | [0.25, 0.75) |
+| 2 | [0.75, 1.00] |
+
+En general: `z = k` si `v ∈ [(k−0.5)/(depth−1), (k+0.5)/(depth−1))`.
+Como el combinado siempre toca 0.0 y 1.0, el z máximo siempre se alcanza.
+
+Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
+
+```
+ 0  0  0  1  1  1  1  1
+ 0  0  1  1  1  1  1  1
+ 0  0  1  1  1  1  1  1
+ 0  1  1  2  1  1  1  2
+ 1  1  1  1  1  1  1  2
+ 0  1  1  1  1  1  1  2
+ 0  0  0  1  1  2  2  1
+ 1  1  1  1  1  2  2  2
+```
+
+## 3. El suelo — qué tipo de terreno hay en cada celda
+
+Con la altura decidida, otro ruido (multi-octava, ponderado por eje según
+`axis_weights`) más la pendiente de profundidad deciden el **tipo de suelo**
+según las `bands` del config. Un diagrama de Voronoi (`biome_count` regiones)
+elige qué juego de bandas aplica en cada zona, para que los terrenos se agrupen
+en regiones en vez de salpicarse.
 
 | Terreno | Costo | Visibilidad |
 |---|---|---|
@@ -53,21 +157,21 @@ para que los terrenos se agrupen en regiones en vez de salpicarse.
 | Grieta | 3.2 | 0.35 |
 | Lava | ∞ (impasable) | 0.10 |
 
-## 3. Obstáculos — rocas y lava
+## 4. Obstáculos — rocas y lava
 
 - **Rocas**: cada celda de superficie se bloquea con probabilidad `block_rate`.
 - **Lava**: se inundan `lava_pools` pozos circulares (centro y radio aleatorios);
   toda celda alcanzada se vuelve lava impasable. Corre después de las rocas para
   sobreescribirlas.
 
-## 4. La red — estaciones
+## 5. La red — estaciones
 
 Los presets de `network.stations` (`id`, `radio`, `señal`) se colocan sobre la
 superficie con *farthest-point*: la primera al azar, cada siguiente lo más lejos
 posible de las anteriores. El radio se capa a la diagonal del mapa. Radio 0 =
 estación puntual: hay que pararse en su celda.
 
-## 5. Los objetivos — puntos de interés
+## 6. Los objetivos — puntos de interés
 
 Cada POI debe cumplir cuatro reglas:
 
