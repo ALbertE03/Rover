@@ -167,27 +167,6 @@ roca. Así queda cada celda asignada a su región:
 0  0  2  2  2  2  2  2
 ```
 
-**¿Cómo se junta el terreno con el Voronoi?** El Voronoi no coloca terrenos
-directamente: elige *con qué regla se mide* el valor de ruido de cada celda.
-Cada celda tiene un valor `v` en [0,1]; su región decide qué juego de bandas se
-usa, y el terreno es la primera banda cuyo borde supere a `v`. Las bandas
-sesgadas reales del ejemplo:
-
-| Región | llanura | arena | roca | grieta |
-|---|---|---|---|---|
-| 0 (arena) | [0, 0.33) | [0.33, 0.78) | [0.78, 0.88) | [0.88, 1] |
-| 1 (llanura) | [0, 0.62) | [0.62, 0.72) | [0.72, 0.88) | [0.88, 1] |
-| 2 (roca) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
-
-Fíjate cómo se ensancha la dominante: la arena pasa de [0.55, 0.72) a
-[0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
-
-- Celda (1,1): `v = 0.385`, región 0 → la arena cubre [0.33, 0.78) → **arena**.
-  Con las bandas sin sesgar, 0.385 habría sido llanura: ahí se ve el efecto.
-- Celda (4,4): `v = 0.514`, región 1 → la llanura cubre [0, 0.62) → **llanura**.
-- Celda (6,6): `v = 0.903`, región 2 → la roca cubre [0.65, 0.93) → **roca**.
-  Con las bandas sin sesgar, 0.903 habría sido grieta.
-
 Después, un **ruido multi-octava** asigna un valor a cada celda:
 
 ```
@@ -210,8 +189,30 @@ valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
 ```
 
 A más profundidad, el valor tiende al extremo caro: abajo hay más roca y
-grietas. Ese valor cae en una banda de la región Voronoi de la celda, y esa
-banda es el terreno. Así queda la asignación en el ejemplo
+grietas.
+
+El Voronoi y el ruido se combinan así: el Voronoi no coloca terrenos
+directamente, sino que elige con qué regla se mide el valor de cada celda.
+Cada celda tiene su valor `v` en [0,1]; su región decide qué juego de bandas se
+usa, y el terreno es la primera banda cuyo borde supere a `v`. Las bandas
+sesgadas reales del ejemplo:
+
+| Región | llanura | arena | roca | grieta |
+|---|---|---|---|---|
+| 0 (arena) | [0, 0.33) | [0.33, 0.78) | [0.78, 0.88) | [0.88, 1] |
+| 1 (llanura) | [0, 0.62) | [0.62, 0.72) | [0.72, 0.88) | [0.88, 1] |
+| 2 (roca) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
+
+La banda dominante se ensancha de forma visible: la arena pasa de [0.55, 0.72)
+a [0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
+
+- Celda (1,1): `v = 0.385`, región 0 → la arena cubre [0.33, 0.78) → **arena**.
+  Con las bandas sin sesgar, 0.385 habría sido llanura.
+- Celda (4,4): `v = 0.514`, región 1 → la llanura cubre [0, 0.62) → **llanura**.
+- Celda (6,6): `v = 0.903`, región 2 → la roca cubre [0.65, 0.93) → **roca**.
+  Con las bandas sin sesgar, 0.903 habría sido grieta.
+
+Así queda la asignación final en el ejemplo
 (`.` llanura, `:` arena, `#` roca, `/` grieta):
 
 ```
