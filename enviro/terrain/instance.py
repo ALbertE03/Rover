@@ -124,19 +124,3 @@ class Map:
         self.pois = {poi.id: poi for poi in pois}
         self._offsets = movement_offsets(params.move_radius, params.move_allow_diagonal)
 
-    #  geometry 
-
-    def cell(self, id_: str) -> Optional[Cell]:
-        """Cell with that id, or None if off the grid."""
-        return self.cells.get(id_)
-
-    #  cost model 
-
-    #  knowledge 
-
-    #  features 
-
-    # statistics
-
-    # reporting 
-

@@ -10,7 +10,6 @@ from .types import (
     FloatGrid,
     HeightGrid,
     NoiseParams,
-    NoisePipeline,
     StarParams,
     TerrainBand,
     Wave,
@@ -216,41 +215,6 @@ class TerrainField:
         if self._heightmap is None:
             self._heightmap = self._build_heightmap()
         return self._heightmap[x][y]
-
-    def heightmap(self) -> HeightGrid:
-        if self.depth <= 1:
-            return [[0 for _ in range(self.height)] for _ in range(self.width)]
-        if self._heightmap is None:
-            self._heightmap = self._build_heightmap()
-        return [row[:] for row in self._heightmap]
-
-    def noise_pipeline(self) -> NoisePipeline:
-        """The 3 heightmap noises, normalized, plus their average.
-
-        For visualization: shows what the terrain is made of before
-        quantization. Deterministic for the same seed.
-        """
-        rng = random.Random(self._noise_seed())
-        star_p, blobs_p, waves_p = self._draw_noise_params(rng)
-        w, h = self.width, self.height
-        fs = [[self._star_value(x, y, star_p) for y in range(h)] for x in range(w)]
-        fb = [[self._blobs_value(x, y, blobs_p) for y in range(h)] for x in range(w)]
-        fw = [[self._waves_value(x, y, waves_p) for y in range(h)] for x in range(w)]
-        ns, nb, nw = self._normalize(fs), self._normalize(fb), self._normalize(fw)
-        combined: FloatGrid = [
-            [(ns[x][y] + nb[x][y] + nw[x][y]) / 3.0 for y in range(h)]
-            for x in range(w)
-        ]
-        return {
-            "star": ns,
-            "blobs": nb,
-            "waves": nw,
-            "combined": combined,
-            "star_arms": int(star_p["arms"]),
-            "star_center": (round(float(star_p["cx"]), 1),
-                            round(float(star_p["cy"]), 1)),
-            "n_blobs": len(blobs_p),
-        }
 
     def is_surface(self, x: int, y: int, z: int) -> bool:
         return z == self.height_at(x, y)
