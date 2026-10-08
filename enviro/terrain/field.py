@@ -54,6 +54,8 @@ class TerrainField:
             draws the heightmap noises' parameters and their mixture
             weights, so the seed shapes the relief beyond the offset.
         depth_slope: How much deeper cells trend toward the expensive end.
+        terrain_relief_weight: How much the column's relief steers the
+            terrain type (0 = noise only, 1 = relief only).
     """
 
     def __init__(
@@ -69,12 +71,14 @@ class TerrainField:
         self.depth = depth
         self.origin = origin
         self.depth_slope = 0.0
+        self.terrain_relief_weight = 0.0
         self.scale = 1
         self.octaves = 1
         self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
         self.bands: List[TerrainBand] = []
         self.mixture_weight_range: Tuple[float, float] = (0.25, 1.0)
         self._heightmap: Optional[HeightGrid] = None
+        self._relief: Optional[FloatGrid] = None
         self._configure(settings if settings is not None else get("generation"))
 
     def _configure(self, settings: Config) -> None:
@@ -82,6 +86,7 @@ class TerrainField:
         self.octaves = settings.get("noise_octaves", 3)
         self.weights = dict(settings.get("axis_weights", {"x": 0.5, "y": 0.5}))
         self.depth_slope = float(settings.get("depth_slope", 0.0))
+        self.terrain_relief_weight = float(settings.get("terrain_relief_weight", 0.0))
         lo, hi = settings.get("mixture_weight_range", [0.25, 1.0])
         self.mixture_weight_range = (float(lo), float(hi))
         self.bands = sorted(
@@ -124,6 +129,10 @@ class TerrainField:
             raise ValueError(f"generation.axis_weights must sum to 1; got {total}")
         if not 0.0 <= self.depth_slope <= 1.0:
             raise ValueError(f"generation.depth_slope must be in [0, 1], got {self.depth_slope}")
+        if not 0.0 <= self.terrain_relief_weight <= 1.0:
+            raise ValueError(
+                f"generation.terrain_relief_weight must be in [0, 1], got {self.terrain_relief_weight}"
+            )
         lo, hi = self.mixture_weight_range
         if not 0.0 <= lo <= hi or not hi > 0.0:
             raise ValueError(
@@ -136,16 +145,6 @@ class TerrainField:
         for _, name in self.bands:
             if name not in known:
                 raise ValueError(f"generation.bands references unknown terrain {name!r}.")
-
-    def value(self, x: float, y: float, z: int) -> float:
-        """Noise value in [0, 1] for a cell.
-
-        Multi-octave triangle-wave noise (see :meth:`_noise`) plus a linear
-        depth slope, clamped to [0, 1]. Deeper cells trend toward the
-        expensive end of the terrain bands.
-        """
-        deepest = max(1, self.depth - 1)
-        return min(1.0, max(0.0, self._noise(x, y) + self.depth_slope * (z / deepest)))
 
     def _noise(self, x: float, y: float) -> float:
         total = 0.0
@@ -264,7 +263,19 @@ class TerrainField:
             for y in range(self.height):
                 h = int(combined[x][y] * (self.depth - 1) + 0.5)
                 raw[x][y] = max(0, min(self.depth - 1, h))
+        self._relief = combined
         return raw
+
+    def _relief_at(self, x: int, y: int) -> float:
+        """Continuous normalized relief in [0, 1] for a column.
+
+        The pre-quantization heightmap field: 0 in the deepest valley, 1 on
+        the highest hill. Used to correlate terrain type with elevation.
+        """
+        if self._heightmap is None:
+            self._heightmap = self._build_heightmap()
+        assert self._relief is not None
+        return self._relief[x][y]
 
     def biome_at(self, x: int, y: int) -> int:
         """Voronoi biome index for a column, or -1 when biomes are off."""
@@ -280,11 +291,20 @@ class TerrainField:
     def terrain_at(self, x: int, y: int, z: int) -> str:
         """Terrain name for a cell.
 
-        Looks the noise value up in the cell's Voronoi biome band set (or
-        the base bands when biomes are off) and returns the first band whose
-        edge exceeds the value.
+        Blends the soil noise with the column's relief so elevation and
+        terrain type correlate: high ground trends toward the expensive end
+        of the bands, low ground toward the cheap end. ``terrain_relief_weight``
+        controls the mix (0 recovers the old noise-only behavior). The depth
+        slope is added afterwards, then the value is looked up in the cell's
+        Voronoi biome band set (or the base bands when biomes are off):
+        the first band whose edge exceeds the value wins.
         """
-        value = self.value(x + self.origin[0], y + self.origin[1], z)
+        w = self.terrain_relief_weight
+        soil = self._noise(x + self.origin[0], y + self.origin[1])
+        if w > 0.0:
+            soil = (1.0 - w) * soil + w * self._relief_at(x, y)
+        deepest = max(1, self.depth - 1)
+        value = min(1.0, max(0.0, soil + self.depth_slope * (z / deepest)))
         bands = self.bands
         b = self.biome_at(x, y)
         if b >= 0:

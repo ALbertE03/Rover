@@ -184,29 +184,37 @@ largo de X.
 
 El valor final suma la pendiente de profundidad y se recorta a [0,1]:
 
-```
-valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
-```
-
-A más profundidad, el valor tiende al extremo caro: abajo hay más terreno rocoso y
-grietas. Así quedan los valores en el ejemplo (superficie, con la pendiente de
-profundidad ya sumada):
+El valor final mezcla el ruido con el relieve, suma la pendiente de
+profundidad y se recorta a [0,1]:
 
 ```
- 0.44  0.46  0.44  0.56  0.63  0.78  0.74  0.61
- 0.37  0.38  0.47  0.48  0.56  0.71  0.67  0.54
- 0.33  0.34  0.43  0.44  0.51  0.67  0.63  0.50
- 0.37  0.48  0.47  0.58  0.56  0.71  0.67  0.64
- 0.43  0.44  0.43  0.44  0.51  0.67  0.63  0.60
- 0.40  0.51  0.50  0.51  0.59  0.74  0.70  0.67
- 0.50  0.52  0.50  0.62  0.69  0.94  0.90  0.67
- 0.73  0.74  0.73  0.74  0.81  1.00  1.00  0.90
+valor(x,y,z) = clamp( (1−w)·ruido(x,y) + w·relieve(x,y)
+                      + depth_slope · z/(depth−1),  0, 1 )
+w = terrain_relief_weight (0.5 por defecto)
+relieve(x,y): campo continuo del heightmap, normalizado a [0,1]
 ```
 
-El terreno de cada celda sale de juntar las dos piezas: el ruido le da un
-valor `v` en [0,1], y la región Voronoi a la que pertenece decide cómo se lee
-ese valor. Cada región tiene su propio juego de bandas, y el terreno es la
-primera banda cuyo borde supere a `v`.
+A más profundidad, el valor tiende al extremo caro. Y con el relieve en la
+mezcla, la altura y el tipo de suelo quedan correlacionados: las zonas altas
+tienden a terreno caro (rocoso, grietas) y las bajas a barato (llanura,
+arena). Así quedan los valores en el ejemplo (superficie):
+
+```
+ 0.29  0.29  0.31  0.48  0.61  0.75  0.74  0.61
+ 0.22  0.25  0.42  0.53  0.65  0.74  0.68  0.55
+ 0.16  0.27  0.49  0.60  0.66  0.71  0.65  0.58
+ 0.25  0.50  0.62  0.78  0.70  0.73  0.70  0.80
+ 0.39  0.52  0.58  0.59  0.61  0.64  0.63  0.78
+ 0.30  0.46  0.47  0.50  0.57  0.69  0.63  0.82
+ 0.35  0.36  0.37  0.54  0.67  0.96  0.94  0.72
+ 0.55  0.56  0.60  0.69  0.81  1.00  1.00  0.93
+```
+
+El terreno de cada celda sale de juntar tres piezas: el ruido multi-octava,
+el relieve y la región Voronoi. El valor `v` mezcla el ruido con el relieve
+continuo (`terrain_relief_weight` controla el reparto); la región decide con
+qué juego de bandas se lee ese valor, y el terreno es la primera banda cuyo
+borde supere a `v`.
 
 Las bandas base salen de `generation.bands` en `config/default.json` y son las
 mismas para todo el mapa:
@@ -231,18 +239,20 @@ Así queda la asignación final en el ejemplo
 (`.` llanura, `:` arena, `#` rocoso, `/` grieta):
 
 ```
-:  :  :  .  :  #  #  .
-:  :  :  .  .  :  :  .
-.  :  :  .  .  :  :  .
-:  :  :  .  .  :  :  :
-:  :  :  .  .  #  :  :
-:  :  :  .  :  #  #  #
-:  :  :  :  #  /  #  #
-:  :  #  #  #  /  /  #
+.  .  .  .  .  #  #  .
+.  .  :  .  :  #  :  .
+.  .  :  .  :  :  :  .
+.  :  :  #  :  #  :  #
+:  :  :  .  .  :  :  #
+.  :  :  .  :  #  :  #
+:  :  :  .  #  /  /  #
+:  :  :  #  #  /  /  /
 ```
 
-Se nota el sesgo de cada región: la 0 es casi toda arena (22 de 23 celdas), la 1
-tira a llanura (13 de 22) y la 2 a terreno rocoso (11 de 19, con 3 grietas).
+Se ven las dos fuerzas: el sesgo de cada región y el relieve. La región 0
+(dominante arena) está en zona baja y queda en llanura y arena (9 y 14 de 23
+celdas); la 2 (dominante rocoso) está en zona alta y concentra lo rocoso y las
+grietas (13 de 19 celdas).
 
 | Terreno | Costo | Visibilidad |
 |---|---|---|
