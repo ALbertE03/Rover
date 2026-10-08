@@ -195,7 +195,17 @@ El terreno de cada celda sale de juntar las dos piezas: el ruido le da un
 valor `v` en [0,1], y la región Voronoi a la que pertenece decide cómo se lee
 ese valor. Cada región tiene su propio juego de bandas, y el terreno es la
 primera banda cuyo borde supere a `v` — el ruido propone un número y la región
-interpreta qué significa. Las bandas sesgadas reales del ejemplo:
+interpreta qué significa.
+
+Las bandas base salen de `generation.bands` en `config/default.json` y son las
+mismas para todo el mapa:
+
+| llanura | arena | rocoso | grieta |
+|---|---|---|---|
+| [0, 0.55) | [0.55, 0.72) | [0.72, 0.88) | [0.88, 1] |
+
+Cada región sesga ese juego hacia su dominante, ensanchando su banda a costa
+de las vecinas. Las bandas sesgadas reales del ejemplo:
 
 | Región | llanura | arena | rocoso | grieta |
 |---|---|---|---|---|
