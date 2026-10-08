@@ -145,17 +145,16 @@ Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
 ## 3. El suelo — qué tipo de terreno hay en cada celda
 
 Antes de repartir terrenos, el mapa se divide en `biome_count` regiones con un
-diagrama de Voronoi: se sortean 3 centros y cada celda cae en la región de su
-centro más cercano. Cada región tiene sus propias bandas, con la del terreno
-dominante ensanchada a costa de las vecinas.
+diagrama de Voronoi: se sortean `biome_count` centros y cada celda cae en la
+región de su centro más cercano. Cada región tiene sus propias bandas, con la
+del terreno dominante ensanchada a costa de las vecinas.
 
-Esto es lo que evita que el mapa salga moteado —sin regiones, el ruido
-repartiría roca, arena y grieta al azar por todos lados—. Con el Voronoi cada
-zona tiene personalidad: por aquí arena, por allá roca. Barato, determinista,
-y el mapa parece un lugar de verdad.
+Sin este paso el ruido repartiría roca, arena y grieta al azar por todos lados
+y el mapa saldría moteado. Con el Voronoi, cada zona queda dominada por un
+terreno y el mapa tiene regiones reconocibles.
 
-Centros sorteados: (1.3, 4.3), (3.4, 4.5) y (4.0, 5.3), con dominantes arena,
-llanura y roca. Así queda cada celda asignada a su región:
+Centros sorteados: (1, 4), (3, 4) y (4, 5), con dominantes arena, llanura y
+roca. Así queda cada celda asignada a su región:
 
 ```
 0  0  0  1  1  1  1  1
@@ -167,6 +166,27 @@ llanura y roca. Así queda cada celda asignada a su región:
 0  0  0  2  2  2  2  2
 0  0  2  2  2  2  2  2
 ```
+
+**¿Cómo se junta el terreno con el Voronoi?** El Voronoi no coloca terrenos
+directamente: elige *con qué regla se mide* el valor de ruido de cada celda.
+Cada celda tiene un valor `v` en [0,1]; su región decide qué juego de bandas se
+usa, y el terreno es la primera banda cuyo borde supere a `v`. Las bandas
+sesgadas reales del ejemplo:
+
+| Región | llanura | arena | roca | grieta |
+|---|---|---|---|---|
+| 0 (arena) | [0, 0.33) | [0.33, 0.78) | [0.78, 0.88) | [0.88, 1] |
+| 1 (llanura) | [0, 0.62) | [0.62, 0.72) | [0.72, 0.88) | [0.88, 1] |
+| 2 (roca) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
+
+Fíjate cómo se ensancha la dominante: la arena pasa de [0.55, 0.72) a
+[0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
+
+- Celda (1,1): `v = 0.385`, región 0 → la arena cubre [0.33, 0.78) → **arena**.
+  Con las bandas sin sesgar, 0.385 habría sido llanura: ahí se ve el efecto.
+- Celda (4,4): `v = 0.514`, región 1 → la llanura cubre [0, 0.62) → **llanura**.
+- Celda (6,6): `v = 0.903`, región 2 → la roca cubre [0.65, 0.93) → **roca**.
+  Con las bandas sin sesgar, 0.903 habría sido grieta.
 
 Después, un **ruido multi-octava** asigna un valor a cada celda:
 
