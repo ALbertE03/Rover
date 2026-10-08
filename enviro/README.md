@@ -116,16 +116,15 @@ combinado[x][y] = 0.18·estrella + 0.39·manchas + 0.43·ondas   → normalizar 
  0.27  0.27  0.36  0.54  0.71  0.78  1.00  0.77
 ```
 
-**Paso 3 — cuantización a capas `z`.** Decisión: `z = round(v · (depth−1))`.
-Cada capa se lleva el rango de valores que redondea hacia ella. Para `depth = 3`:
+**Paso 3 — cuantización a capas `z`.** Decisión: `z = round(v · (n−1))` con
+`n = depth`. Cada capa se lleva el rango de valores que redondea hacia ella:
 
 | z | rango de v |
 |---|---|
-| 0 | [0.00, 0.25) |
-| 1 | [0.25, 0.75) |
-| 2 | [0.75, 1.00] |
+| 0 | [0, 0.5/(n−1)) |
+| k (1 ≤ k ≤ n−2) | [(k−0.5)/(n−1), (k+0.5)/(n−1)) |
+| n−1 | [1 − 0.5/(n−1), 1] |
 
-En general: `z = k` si `v ∈ [(k−0.5)/(depth−1), (k+0.5)/(depth−1))`.
 Como el combinado siempre toca 0.0 y 1.0, el z máximo siempre se alcanza.
 
 Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
