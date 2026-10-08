@@ -346,7 +346,13 @@ class MapGenerator:
         if total <= 0:
             return 0.0
         climb = cell.pos[2] / max(1, p.depth - 1)
-        costs = [terrain(name).cost for name in terrain_names()]
+        # Normalize over the terrains a point of interest can actually stand
+        # on: the band terrains. Special terrains like lava are never
+        # candidates (their cells are blocked), and their extreme costs would
+        # squash the normalization flat.
+        band_names = [b["terrain"] for b in self.config["generation"].get("bands", [])]
+        names = band_names or terrain_names()
+        costs = [terrain(name).cost for name in names]
         span = max(costs) - min(costs)
         ground = (terrain(cell.true_terrain).cost - min(costs)) / span if span > 0 else 0.0
         return (p.poi_interest_climb_weight * climb + p.poi_interest_ground_weight * ground) / total
