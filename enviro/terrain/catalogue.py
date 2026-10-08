@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from statistics import median
 from typing import Dict, List
 from ..config import get
 
@@ -31,7 +32,8 @@ def build_registry(entries: Dict) -> Dict[str, Terrain]:
         entries: ``{name: {cost, visibility, glyph}}``.
 
     Returns:
-        The registry, including the unsurveyed sentinel.
+        The registry, including the unsurveyed sentinel (costed at the median
+        of the catalogue, so extreme special-terrain costs don't skew it).
 
     Raises:
         ValueError: The catalogue is empty, reserves ``unknown``, or declares
@@ -68,8 +70,11 @@ def build_registry(entries: Dict) -> Dict[str, Terrain]:
 
         registry[name] = Terrain(name, cost, visibility, glyph)
 
-    mean = sum(t.cost for t in registry.values()) / len(registry)
-    registry[UNKNOWN] = Terrain(UNKNOWN, mean, 0.0, "?")
+    # Median, not mean: special terrains like lava carry extreme costs that
+    # would make unsurveyed ground absurdly expensive. The median is the cost
+    # of a typical cell.
+    typical = median(t.cost for t in registry.values())
+    registry[UNKNOWN] = Terrain(UNKNOWN, typical, 0.0, "?")
     return registry
 
 #: Name to terrain
