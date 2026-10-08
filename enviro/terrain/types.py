@@ -35,4 +35,5 @@ Blob = Tuple[float, float, float]
 Wave = Tuple[float, float, float]
 
 # The three noise parameter sets drawn per seed.
-NoiseParams = Tuple[StarParams, List[Blob], List[Wave]]
+# The seed-drawn mixture weights (star, blobs, waves), summing to 1.
+NoiseParams = Tuple[StarParams, List[Blob], List[Wave], Tuple[float, float, float]]
