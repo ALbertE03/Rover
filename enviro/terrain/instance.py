@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 from .features import Poi, Station
-from .grid import Cell, distance, movement_offsets
+from .grid import Cell, distance
 
 @dataclass(frozen=True)
 class MapParams:
@@ -122,5 +122,4 @@ class Map:
         self.cells = cells
         self.stations = tuple(stations)
         self.pois = {poi.id: poi for poi in pois}
-        self._offsets = movement_offsets(params.move_radius, params.move_allow_diagonal)
 
