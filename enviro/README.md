@@ -153,7 +153,7 @@ Sin este paso el ruido repartiría terreno rocoso, arena y grieta al azar por to
 y el mapa saldría moteado. Con el Voronoi, cada zona queda dominada por un
 terreno y el mapa tiene regiones reconocibles.
 
-Centros sorteados: (1, 4), (3, 4) y (4, 5), con dominantes arena, llanura y
+Centros sorteados: (1.3, 4.3), (3.4, 4.5) y (4.0, 5.3), con dominantes arena, llanura y
 terreno rocoso. Así queda cada celda asignada a su región:
 
 ```
@@ -194,8 +194,7 @@ grietas.
 El terreno de cada celda sale de juntar las dos piezas: el ruido le da un
 valor `v` en [0,1], y la región Voronoi a la que pertenece decide cómo se lee
 ese valor. Cada región tiene su propio juego de bandas, y el terreno es la
-primera banda cuyo borde supere a `v` — el ruido propone un número y la región
-interpreta qué significa.
+primera banda cuyo borde supere a `v`.
 
 Las bandas base salen de `generation.bands` en `config/default.json` y son las
 mismas para todo el mapa:
@@ -214,13 +213,7 @@ de las vecinas. Las bandas sesgadas reales del ejemplo:
 | 2 (terreno rocoso) | [0, 0.55) | [0.55, 0.65) | [0.65, 0.93) | [0.93, 1] |
 
 La banda dominante se ensancha de forma visible: la arena pasa de [0.55, 0.72)
-a [0.33, 0.78) en su región. Tres celdas del ejemplo, paso a paso:
-
-- Celda (1,1): `v = 0.385`, región 0 → la arena cubre [0.33, 0.78) → **arena**.
-  Con las bandas sin sesgar, 0.385 habría sido llanura.
-- Celda (4,4): `v = 0.514`, región 1 → la llanura cubre [0, 0.62) → **llanura**.
-- Celda (6,6): `v = 0.903`, región 2 → el terreno rocoso cubre [0.65, 0.93) → **rocoso**.
-  Con las bandas sin sesgar, 0.903 habría sido grieta.
+a [0.33, 0.78) en su región.
 
 Así queda la asignación final en el ejemplo
 (`.` llanura, `:` arena, `#` rocoso, `/` grieta):
