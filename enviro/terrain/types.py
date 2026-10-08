@@ -34,6 +34,6 @@ Blob = Tuple[float, float, float]
 # One directional wave: (angle, frequency, phase).
 Wave = Tuple[float, float, float]
 
-# The three noise parameter sets drawn per seed.
-# The seed-drawn mixture weights (star, blobs, waves), summing to 1.
+# The three noise parameter sets plus their seed-drawn mixture weights
+# (star, blobs, waves), summing to 1.
 NoiseParams = Tuple[StarParams, List[Blob], List[Wave], Tuple[float, float, float]]

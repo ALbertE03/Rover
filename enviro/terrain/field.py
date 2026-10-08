@@ -19,7 +19,8 @@ def _biased_bands(bands: List[TerrainBand],
                   dominant: str) -> List[TerrainBand]:
     """Widen the dominant terrain's band so it clusters in its biome.
 
-    Doubles the dominant band's width by stealing half from each neighbor.
+    Steals 40% of each neighboring band's width and hands it to the dominant
+    one, then rebuilds the edges. The last edge is pinned to 1.0.
     """
     widths: List[float] = []
     prev = 0.0
@@ -48,8 +49,10 @@ class TerrainField:
         width: Grid extent on x.
         height: Grid extent on y.
         depth: Vertical layers.
-        origin: Phase offset in cell units, which is the seed's only
-            influence on the terrain itself.
+        origin: Phase offset in cell units, drawn from the seed. It shifts
+            the noise fields, and a deterministic integer derived from it
+            draws the heightmap noises' parameters and their mixture
+            weights, so the seed shapes the relief beyond the offset.
         depth_slope: How much deeper cells trend toward the expensive end.
     """
 
@@ -135,6 +138,12 @@ class TerrainField:
                 raise ValueError(f"generation.bands references unknown terrain {name!r}.")
 
     def value(self, x: float, y: float, z: int) -> float:
+        """Noise value in [0, 1] for a cell.
+
+        Multi-octave triangle-wave noise (see :meth:`_noise`) plus a linear
+        depth slope, clamped to [0, 1]. Deeper cells trend toward the
+        expensive end of the terrain bands.
+        """
         deepest = max(1, self.depth - 1)
         return min(1.0, max(0.0, self._noise(x, y) + self.depth_slope * (z / deepest)))
 
@@ -233,9 +242,9 @@ class TerrainField:
 
         The seed draws both the noise parameters and the mixture weights, so
         it controls how much each noise contributes. Normalizing the combined
-        field (instead of stretching it with a contrast knob) already spans
-        the full [0, depth-1] range: no median passes, no peak clipping and no
-        sub-hills, what comes out of the 3 noises is the final terrain.
+        field spans the full [0, 1] range by construction, so quantization
+        always reaches every layer: what comes out of the 3 noises is the
+        final terrain.
         """
         rng = random.Random(self._noise_seed())
         star_p, blobs_p, waves_p, weights = self._draw_noise_params(rng)
@@ -269,6 +278,12 @@ class TerrainField:
         return best
 
     def terrain_at(self, x: int, y: int, z: int) -> str:
+        """Terrain name for a cell.
+
+        Looks the noise value up in the cell's Voronoi biome band set (or
+        the base bands when biomes are off) and returns the first band whose
+        edge exceeds the value.
+        """
         value = self.value(x + self.origin[0], y + self.origin[1], z)
         bands = self.bands
         b = self.biome_at(x, y)
