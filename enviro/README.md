@@ -144,21 +144,18 @@ Heightmap resultante (ejemplo: `v = 0.78 → z = 2`, `v = 0.13 → z = 0`):
 
 ## 3. El suelo — qué tipo de terreno hay en cada celda
 
-**El Voronoi: qué hace y por qué.** Antes de asignar ningún terreno, el mapa se
-particiona en `biome_count` regiones: se sortean 3 centros y cada celda pertenece
-a la región de su centro más cercano. Cada región recibe su propio juego de
-bandas, sesgado hacia un terreno dominante —la banda del dominante se ensancha
-robándole ancho a las vecinas—.
+Antes de repartir terrenos, el mapa se divide en `biome_count` regiones con un
+diagrama de Voronoi: se sortean 3 centros y cada celda cae en la región de su
+centro más cercano. Cada región tiene sus propias bandas, con la del terreno
+dominante ensanchada a costa de las vecinas.
 
-¿Por qué este paso? Sin él, el tipo de terreno dependería solo del ruido y el
-mapa saldría moteado: roca, arena y grieta salpicadas sin orden ni zonas. El
-Voronoi le da *geografía* al mapa con una operación barata y determinista: aquí
-una zona arenosa, allá una rocosa. Es la diferencia entre "terreno aleatorio" y
-"terreno que parece un lugar".
+Esto es lo que evita que el mapa salga moteado —sin regiones, el ruido
+repartiría roca, arena y grieta al azar por todos lados—. Con el Voronoi cada
+zona tiene personalidad: por aquí arena, por allá roca. Barato, determinista,
+y el mapa parece un lugar de verdad.
 
-Ejemplo real (misma grilla 8×8, semilla 7): centros sorteados en (1.3, 4.3),
-(3.4, 4.5) y (4.0, 5.3), con dominantes arena, llanura y roca. Así queda cada
-celda asignada a su región:
+Centros sorteados: (1.3, 4.3), (3.4, 4.5) y (4.0, 5.3), con dominantes arena,
+llanura y roca. Así queda cada celda asignada a su región:
 
 ```
 0  0  0  1  1  1  1  1
@@ -194,7 +191,22 @@ valor(x,y,z) = clamp( ruido(x,y) + depth_slope · z/(depth−1),  0,  1 )
 
 A más profundidad, el valor tiende al extremo caro: abajo hay más roca y
 grietas. Ese valor cae en una banda de la región Voronoi de la celda, y esa
-banda es el terreno.
+banda es el terreno. Así queda la asignación en el ejemplo
+(`.` llanura, `:` arena, `#` roca, `/` grieta):
+
+```
+:  :  :  .  :  #  #  .
+:  :  :  .  .  :  :  .
+.  :  :  .  .  :  :  .
+:  :  :  .  .  :  :  :
+:  :  :  .  .  #  :  :
+:  :  :  .  :  #  #  #
+:  :  :  :  #  /  #  #
+:  :  #  #  #  /  /  #
+```
+
+Se nota el sesgo de cada región: la 0 es casi toda arena (22 de 23 celdas), la 1
+tira a llanura (13 de 22) y la 2 a roca (11 de 19, con 3 grietas).
 
 | Terreno | Costo | Visibilidad |
 |---|---|---|
@@ -227,13 +239,3 @@ Cada POI debe cumplir cuatro reglas:
 3. **Interesante** — cuesta llegar (altura, terreno caro) pero premia (más altura
    = más radio de exploración).
 4. **Disperso** — uno por capa primero; los empates se rompen por lejanía.
-
-## Configuración
-
-Todo vive en `config/default.json`, documentado en el [README principal](../README.md).
-
-## El resultado
-
-`generate()` devuelve un `Map`: un contenedor puro de datos con `cells`
-(diccionario por id `"z01_y04_x09"`), `params` (el spec congelado), `pois` y
-`stations`. Sin métodos: lo generas, lo lees.
