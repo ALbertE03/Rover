@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Tuple
-from .grid import Coord, distance
-
+from .grid import Coord
 
 @dataclass(frozen=True)
 class Station:
@@ -10,10 +9,6 @@ class Station:
     Coverage is a sphere, which is what makes depth matter to the network: a
     station that blankets the surface leaves the lower layers uncovered, and
     the gap is a property of the terrain rather than an accident.
-
-    Range shrinks with signal quality::
-
-        effective_radius = radius * signal
 
     Attributes:
         id: Station name.
@@ -26,19 +21,6 @@ class Station:
     center: Coord
     radius: float
     signal: float
-
-    @property
-    def effective_radius(self) -> float:
-        """Range actually usable at this signal quality."""
-        return self.radius * self.signal
-
-    def covers(self, pos: Coord) -> bool:
-        """Whether the station reaches ``pos``."""
-        return distance(self.center, pos) <= self.effective_radius
-
-    def __repr__(self) -> str:
-        return f"Station({self.id}, center={self.center}, r={self.effective_radius:.1f})"
-
 
 @dataclass(frozen=True)
 class Poi:
@@ -63,10 +45,6 @@ class Poi:
     cell_id: str
     min_visibility: float = 0.0
     interest: float = 0.0
-
-    def __repr__(self) -> str:
-        return f"Poi({self.id} @ {self.cell_id})"
-
 
 def place_stations(
     presets: Tuple[Tuple[str, float, float], ...],

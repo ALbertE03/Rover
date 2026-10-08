@@ -14,9 +14,7 @@ from .types import (
     StarParams,
     TerrainBand,
     Wave,
-    XY,
 )
-
 
 def _biased_bands(bands: List[TerrainBand],
                   dominant: str) -> List[TerrainBand]:
@@ -43,7 +41,6 @@ def _biased_bands(bands: List[TerrainBand],
         out.append((edge, name))
     out[-1] = (1.0, out[-1][1])
     return out
-
 
 class TerrainField:
     """Terrain as a function of position.
@@ -258,9 +255,6 @@ class TerrainField:
     def is_surface(self, x: int, y: int, z: int) -> bool:
         return z == self.height_at(x, y)
 
-    def is_interior(self, x: int, y: int, z: int) -> bool:
-        return z < self.height_at(x, y)
-
     def _build_heightmap(self) -> HeightGrid:
         """Star + blobs + waves -> average -> contrast -> quantization.
 
@@ -311,30 +305,6 @@ class TerrainField:
             if value < edge:
                 return name
         return bands[-1][1]
-
-    def layer_profile(self, z: int) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
-        for x in range(self.width):
-            for y in range(self.height):
-                name = self.terrain_at(x, y, z)
-                counts[name] = counts.get(name, 0) + 1
-        return counts
-
-    def surface_profile(self) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
-        for x in range(self.width):
-            for y in range(self.height):
-                z = self.height_at(x, y)
-                name = self.terrain_at(x, y, z)
-                counts[name] = counts.get(name, 0) + 1
-        return counts
-
-    def __repr__(self) -> str:
-        return (f"TerrainField({self.width}x{self.height}x{self.depth}, "
-                f"scale={self.scale}, octaves={self.octaves}, "
-                f"slope={self.depth_slope}, bands={len(self.bands)}, "
-                f"h_contrast={self.height_contrast})")
-
 
 def _wave(position: float, extent: int) -> float:
     return abs((position / max(1, extent)) % 2.0 - 1.0)
