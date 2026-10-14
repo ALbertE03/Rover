@@ -1,9 +1,6 @@
 [project]
 name = "rover"
 version = "0.1.0"
-description = "Add your description here"
+description = "Deterministic synthetic 3D terrain generator for rover-exploration simulation"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "pillow==12.3.0",
-]
