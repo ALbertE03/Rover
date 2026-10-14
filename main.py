@@ -1,13 +1,3 @@
-"""Aggregate statistics over a batch of generated terrains.
-
-Usage:
-    python main.py [count]
-
-Generates `count` terrains (default 30) with seeds 0..count-1 under the
-default configuration and prints aggregate statistics: terrain mix, column
-heights, blocked cells, stations and points of interest.
-"""
-
 import sys
 import time
 from collections import Counter
