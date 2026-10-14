@@ -80,6 +80,7 @@ que lo elijan como dominante.
 
 ```
 ├── config/default.json      # toda la configuración
+├── main.py                  # estadísticas agregadas de un lote de terrenos
 ├── enviro/
 │   ├── README.md            # explicación paso a paso de la generación
 │   ├── config.py            # carga del JSON
