@@ -285,10 +285,11 @@ estación puntual: hay que pararse en su celda.
 
 ## 6. Los objetivos — puntos de interés
 
-Cada POI debe cumplir cuatro reglas:
+Cada POI debe cumplir cinco reglas:
 
 1. **Alcanzable** — se llega desde la superficie sin cruzar rocas.
 2. **Observable** — alguna celda vecina tiene visibilidad ≥ `min_visibility`.
 3. **Interesante** — cuesta llegar (altura, terreno caro) pero premia (más altura
    = más radio de exploración).
 4. **Disperso** — uno por capa primero; los empates se rompen por lejanía.
+5. **No en una estación** — nunca se coloca sobre la celda de una estación.
