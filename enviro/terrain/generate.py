@@ -111,8 +111,13 @@ class InstanceParams:
 class MapGenerator:
     """Builds :class:`~enviro.terrain.instance.Map` instances.
 
+    The only way to obtain parameters is
+    :meth:`InstanceParams.from_config`: there is no default, no seed
+    shortcut and no top-level ``generate`` helper. A map is always
+    ``MapGenerator(InstanceParams.from_config(...)).create()``.
+
     Attributes:
-        params: Instance parameters.
+        params: Instance parameters, from ``InstanceParams.from_config``.
         config: The parsed configuration in force: the default, overridden
             by the file at ``params.config_path`` (if any), overridden by
             the ``params.config`` dict (if any).
@@ -121,11 +126,8 @@ class MapGenerator:
         map_params: The resolved spec handed to each map.
     """
 
-    def __init__(self, params: Optional[InstanceParams] = None,
-                 seed: Optional[int] = None) -> None:
-        self.params = params or InstanceParams.from_config()
-        if seed is not None:
-            self.params = replace(self.params, seed=seed)
+    def __init__(self, params: InstanceParams) -> None:
+        self.params = params
         if self.params.seed is None:
             # Unseeded map: draw a concrete seed so every downstream draw
             # (biome centers, noise parameters, placement) has something
@@ -512,18 +514,3 @@ class MapGenerator:
                 if c is not None and c.traversable:
                     out.append(c)
         return out
-
-def generate(seed: int, **overrides: Any) -> Map:
-    """Generate one map for a seed.
-
-    ``overrides`` are :class:`InstanceParams` fields. ``config`` among them
-    is a partial configuration dict that overrides the default: with no
-    config at all, the default configuration is used as-is.
-
-    Example:
-        >>> a = generate(42)
-        >>> b = generate(42)
-        >>> sorted(a.cells) == sorted(b.cells)
-        True
-    """
-    return MapGenerator(InstanceParams.from_config(seed=seed, **overrides)).create()
