@@ -8,7 +8,7 @@ from .catalogue import (
 )
 from .features import Poi, Station, place_stations
 from .field import TerrainField
-from .generate import InstanceParams, MapGenerator, generate
+from .generate import InstanceParams, MapGenerator
 from .grid import (
     Cell,
     Coord,
@@ -61,7 +61,6 @@ __all__ = [
     "build_registry",
     "cell_id",
     "distance",
-    "generate",
     "movement_offsets",
     "neighbour_offsets",
     "parse_cell_id",
