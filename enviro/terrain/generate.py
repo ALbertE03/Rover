@@ -231,8 +231,7 @@ class MapGenerator:
             x, y, z = cell.pos
             if not self.field.is_surface(x, y, z):
                 continue
-            if not cell.blocked:
-                cell.blocked = self.rng.random() < self.params.block_rate
+            cell.blocked = self.rng.random() < self.params.block_rate
 
     def _place_lava_pools(self, cells: Dict[str, Cell]) -> None:
         """Flood circular pools with impassable lava.
@@ -394,7 +393,7 @@ class MapGenerator:
         scored = [(self._interest(cells[id_]), id_) for id_ in candidates]
         best = max(score for score, _ in scored)
         pool = [id_ for score, id_ in scored if score >= best * 0.95]
-        return self._farthest(cells, pool, chosen)
+        return self._farthest(pool, chosen)
 
     def _best_spread(
         self,
@@ -441,8 +440,6 @@ class MapGenerator:
         observable: Set[str] = set()
         for id_ in reachable:
             cell = cells[id_]
-            if cell.poi_id:
-                continue
             x, y, z = cell.pos
             for dx, dy, dz in view_offsets:
                 vantage = cells.get(cell_id(x + dx, y + dy, z + dz))
@@ -455,17 +452,15 @@ class MapGenerator:
 
     def _farthest(
         self,
-        cells: Dict[str, Cell],
         candidates: Sequence[str],
         chosen: Sequence[str],
-        exclude: Optional[Sequence[str]] = None,
     ) -> str:
         """Candidate furthest from the points of interest already placed.
 
         Ties go to the RNG, so two seeds do not both get the same corner. With
         nothing placed yet the draw is uniform.
         """
-        pool = [id_ for id_ in candidates if not exclude or id_ not in exclude]
+        pool = list(candidates)
         if not pool:
             raise ValueError("no candidate left to place a point of interest on")
         if not chosen:
