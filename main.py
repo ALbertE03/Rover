@@ -3,7 +3,7 @@ import time
 from collections import Counter
 from typing import Dict, List
 
-from enviro.terrain import Map, generate
+from enviro.terrain import InstanceParams, Map, MapGenerator
 
 # Display order follows the generation bands, cheapest first.
 TERRAIN_ORDER = ("plain", "sand", "rocky", "crevasse", "lava")
@@ -82,7 +82,10 @@ def report(stats: Dict, elapsed: float) -> None:
 def main(count: int) -> None:
     """Generate `count` terrains and report aggregate statistics."""
     start = time.time()
-    maps = [generate(seed) for seed in range(count)]
+    maps = [
+        MapGenerator(InstanceParams.from_config(seed=seed)).create()
+        for seed in range(count)
+    ]
     elapsed = time.time() - start
     report(summarize(maps), elapsed)
 
