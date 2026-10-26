@@ -2,7 +2,7 @@ import math
 import random
 from typing import Dict, List, Optional, Tuple
 from ..config import get
-from .catalogue import terrain_names
+from .catalogue import TERRAIN, Terrain, terrain_names
 from .types import (
     BiomeCenter,
     Blob,
@@ -69,11 +69,15 @@ class TerrainField:
         depth: int,
         origin: Tuple[float, float] = (0.0, 0.0),
         settings: Optional[Config] = None,
+        terrain_registry: Optional[Dict[str, Terrain]] = None,
     ) -> None:
         self.width = width
         self.height = height
         self.depth = depth
         self.origin = origin
+        self.terrain_registry = (
+            terrain_registry if terrain_registry is not None else TERRAIN
+        )
         self.depth_slope = 0.0
         self.terrain_relief_weight = 0.0
         self.relief_amplitude_options: Tuple[float, ...] = (1.0,)
@@ -167,7 +171,7 @@ class TerrainField:
         edges = [edge for edge, _ in self.bands]
         if len(set(edges)) != len(edges):
             raise ValueError(f"generation.bands must have distinct 'max' values, got {edges}.")
-        known = set(terrain_names())
+        known = set(terrain_names(self.terrain_registry))
         for _, name in self.bands:
             if name not in known:
                 raise ValueError(f"generation.bands references unknown terrain {name!r}.")
