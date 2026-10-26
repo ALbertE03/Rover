@@ -32,6 +32,37 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 | `rover` | `battery`, `memory` (declarados; el generador no los gasta) |
 | `terrain` | Catálogo: `cost`, `visibility`, `glyph` por tipo |
 
+## Configuración del consumidor
+
+Quien consume la API puede mandar su propio config parcial y este sobrescribe
+al por defecto; si no manda ninguno, se usa el por defecto tal cual. La fusión
+es profunda: los diccionarios anidados se mezclan clave a clave, y las listas
+y escalares reemplazan al valor por defecto (no se concatenan).
+
+```python
+from enviro.terrain import generate
+
+# Solo cambia lo que manda; el resto sigue siendo el config por defecto.
+mapa = generate(42, config={
+    "generation": {"relief_amplitude": 1.0},  # relieve completo siempre
+    "map": {"width": 20},
+    "terrain": {"plain": {"cost": 50.0}},  # visibility y glyph de plain se conservan
+})
+```
+
+Un archivo parcial también vale, con la misma regla, vía `config_path`:
+
+```python
+from pathlib import Path
+from enviro.terrain import MapGenerator, InstanceParams
+
+gen = MapGenerator(InstanceParams.from_config(config_path=Path("mi_config.json")))
+```
+
+Precedencia, de menor a mayor: por defecto < archivo en `config_path` < dict
+en `config`. El dict que se manda se copia, así que cambiarlo después no
+afecta al generador ya construido.
+
 ## Cómo agregar nuevos terrenos
 
 Los tipos de terreno viven en dos lugares de `config/default.json`:
