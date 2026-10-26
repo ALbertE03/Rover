@@ -2,7 +2,7 @@ import random
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-from ..config import load_config,get
+from ..config import get, resolve_config
 from .catalogue import TERRAIN, build_registry, terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
@@ -17,9 +17,9 @@ class InstanceParams:
     """What varies between instances of the same config.
 
     Deliberately short: the knobs an experiment sweeps. Terrain costs, station
-    presets and the shape of the noise field stay in ``config/default.json``,
-    so the family of instances remains explicit and reviewable rather than
-    hidden in keyword arguments.
+    presets and the shape of the noise field stay in the configuration in
+    force, so the family of instances remains explicit and reviewable rather
+    than hidden in keyword arguments.
 
     Attributes:
         width: Grid extent on x.
@@ -34,6 +34,11 @@ class InstanceParams:
         seed: Seed for the whole instance. None means an unseeded map: the
             generator draws a random seed at construction and records it.
         config_path: Alternate configuration file.
+        config: Partial configuration dict from the consumer. It overrides
+            the default configuration, and the file at ``config_path`` when
+            both are given: nested dicts merge, lists and scalars replace.
+            When absent, the default configuration (or the file) is used
+            as-is. The dict is copied, never referenced.
     """
     width: int = 12
     height: int = 12
@@ -43,12 +48,22 @@ class InstanceParams:
     station_count: int = 2
     seed: Optional[int] = None
     config_path: Optional[Path] = None
+    config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
+        if self.config_path is None and self.config is None:
+            min_axis, max_axis = MIN_AXIS, MAX_AXIS
+        else:
+            # Axis limits come from the configuration in force, so a
+            # consumer override (or file) that raises max_axis is honoured
+            # instead of silently keeping the default limits.
+            map_section = resolve_config(self.config_path, self.config).get("map", {})
+            min_axis = map_section.get("min_axis", MIN_AXIS)
+            max_axis = map_section.get("max_axis", MAX_AXIS)
         for name in ("width", "height"):
             value = getattr(self, name)
-            if not MIN_AXIS <= value <= MAX_AXIS:
-                raise ValueError(f"{name} must be in [{MIN_AXIS}, {MAX_AXIS}], got {value}")
+            if not min_axis <= value <= max_axis:
+                raise ValueError(f"{name} must be in [{min_axis}, {max_axis}], got {value}")
         if not 0.0 <= self.block_rate <= 1.0:
             raise ValueError(f"block_rate must be in [0, 1], got {self.block_rate}")
         if self.depth < 0:
@@ -64,16 +79,22 @@ class InstanceParams:
 
     @classmethod
     def from_config(cls, path: Optional[Path] = None, **overrides: Any) -> "InstanceParams":
-        """Take the instance fields from a JSON file, then apply overrides.
+        """Take the instance fields from the configuration in force, then apply overrides.
+
+        The configuration in force is the default, overridden by the file at
+        ``path`` (if given), overridden by the ``config`` dict in
+        ``overrides`` (if given). Either source may be partial.
 
         Args:
             path: Alternate config file. Defaults to ``config/default.json``.
-            **overrides: Any field of this class, which wins over the file.
+            **overrides: Any field of this class, which wins over the
+                configuration in force. ``config`` here is a partial
+                configuration dict, not a file.
 
         Returns:
             Validated parameters.
         """
-        config = load_config(path)
+        config = resolve_config(path, overrides.get("config"))
         values: Dict[str, object] = {
             "width": config["map"]["width"],
             "height": config["map"]["height"],
@@ -82,6 +103,7 @@ class InstanceParams:
             "poi_count": config["poi"]["count"],
             "station_count": len(config["network"]["stations"]),
             "config_path": path,
+            "config": overrides.get("config"),
         }
         values.update(overrides)
         return cls(**values)  # type: ignore[arg-type]
@@ -91,7 +113,10 @@ class MapGenerator:
 
     Attributes:
         params: Instance parameters.
-        config: The parsed configuration in force.
+        config: The parsed configuration in force: the default, overridden
+            by the file at ``params.config_path`` (if any), overridden by
+            the ``params.config`` dict (if any).
+        terrain_registry: The terrain catalogue from ``config``.
         field: The terrain field in force, rebuilt by every :meth:`create`.
         map_params: The resolved spec handed to each map.
     """
@@ -106,7 +131,7 @@ class MapGenerator:
             # (biome centers, noise parameters, placement) has something
             # deterministic to work with. The drawn seed stays on params.
             self.params = replace(self.params, seed=random.randint(0, 2**32 - 1))
-        self.config = load_config(self.params.config_path)
+        self.config = resolve_config(self.params.config_path, self.params.config)
         # The terrain catalogue in force: the config's own, not the default
         # one built at import time, so an alternate config's costs and
         # visibilities actually drive interest and observability.
@@ -490,6 +515,10 @@ class MapGenerator:
 
 def generate(seed: int, **overrides: Any) -> Map:
     """Generate one map for a seed.
+
+    ``overrides`` are :class:`InstanceParams` fields. ``config`` among them
+    is a partial configuration dict that overrides the default: with no
+    config at all, the default configuration is used as-is.
 
     Example:
         >>> a = generate(42)
