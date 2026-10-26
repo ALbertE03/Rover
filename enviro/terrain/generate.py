@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from ..config import load_config,get
-from .catalogue import terrain, terrain_names
+from .catalogue import TERRAIN, build_registry, terrain, terrain_names
 from .features import Poi, Station, place_stations
 from .field import TerrainField
 from .grid import Cell, cell_id, distance, movement_offsets, neighbour_offsets, parse_cell_id, reachable_cells
@@ -107,6 +107,14 @@ class MapGenerator:
             # deterministic to work with. The drawn seed stays on params.
             self.params = replace(self.params, seed=random.randint(0, 2**32 - 1))
         self.config = load_config(self.params.config_path)
+        # The terrain catalogue in force: the config's own, not the default
+        # one built at import time, so an alternate config's costs and
+        # visibilities actually drive interest and observability.
+        self.terrain_registry = (
+            build_registry(self.config["terrain"])
+            if "terrain" in self.config
+            else TERRAIN
+        )
         self.rng = random.Random(self.params.seed)
         self.field = self._build_field()
         self.map_params = self._map_params()
@@ -128,7 +136,7 @@ class MapGenerator:
         self._place_boulders(cells)
         self._place_lava_pools(cells)
         stations = self._place_stations(cells)
-        pois = self._place_pois(cells)
+        pois = self._place_pois(cells, stations)
         return Map(self.map_params, cells, stations, pois)
 
     #  parameters 
@@ -147,6 +155,7 @@ class MapGenerator:
             self.params.depth,
             origin=origin,
             settings=settings,
+            terrain_registry=self.terrain_registry,
         )
 
     def _map_params(self) -> MapParams:
@@ -284,10 +293,12 @@ class MapGenerator:
 
         return place_stations(presets, tuple(centers), self.map_params.diagonal)
 
-    def _place_pois(self, cells: Dict[str, Cell]) -> List[Poi]:
+    def _place_pois(
+        self, cells: Dict[str, Cell], stations: Tuple[Station, ...]
+    ) -> List[Poi]:
         """Place points of interest on reachable, observable, well-spread ground.
 
-        Four rules, all about instance quality rather than realism:
+        Five rules, all about instance quality rather than realism:
 
         * **Reachable from the surface.** Nothing interesting is walled off.
         * **Observable.** Some cell next to it has ground clear enough to see
@@ -301,9 +312,12 @@ class MapGenerator:
         * **Spread.** One per layer first, so depth has to be descended into,
           and each one placed as far from the others as the map allows. Two
           points of interest a cell apart are one trip, not two.
+        * **Not on a station.** A point of interest never stands on a station
+          cell: it would already be visited at the start.
         """
         threshold = self.map_params.poi_min_visibility
-        candidates = self._observable_cells(cells, threshold)
+        station_ids = {cell_id(*station.center) for station in stations}
+        candidates = self._observable_cells(cells, threshold) - station_ids
         by_layer: Dict[int, List[str]] = {}
         for id_ in sorted(candidates):
             by_layer.setdefault(parse_cell_id(id_)[2], []).append(id_)
@@ -359,10 +373,10 @@ class MapGenerator:
         # candidates (their cells are blocked), and their extreme costs would
         # squash the normalization flat.
         band_names = [b["terrain"] for b in self.config["generation"].get("bands", [])]
-        names = band_names or terrain_names()
-        costs = [terrain(name).cost for name in names]
+        names = band_names or terrain_names(self.terrain_registry)
+        costs = [terrain(name, self.terrain_registry).cost for name in names]
         span = max(costs) - min(costs)
-        ground = (terrain(cell.true_terrain).cost - min(costs)) / span if span > 0 else 0.0
+        ground = (terrain(cell.true_terrain, self.terrain_registry).cost - min(costs)) / span if span > 0 else 0.0
         return (p.poi_interest_climb_weight * climb + p.poi_interest_ground_weight * ground) / total
 
     def _best(
@@ -434,7 +448,7 @@ class MapGenerator:
                 vantage = cells.get(cell_id(x + dx, y + dy, z + dz))
                 if vantage is None or not vantage.traversable:
                     continue
-                if terrain(vantage.true_terrain).visibility >= threshold:
+                if terrain(vantage.true_terrain, self.terrain_registry).visibility >= threshold:
                     observable.add(id_)
                     break
         return observable
