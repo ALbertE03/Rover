@@ -78,14 +78,6 @@ class TerrainField:
         self.terrain_registry = (
             terrain_registry if terrain_registry is not None else TERRAIN
         )
-        self.depth_slope = 0.0
-        self.terrain_relief_weight = 0.0
-        self.relief_amplitude_options: Tuple[float, ...] = (1.0,)
-        self.scale = 1
-        self.octaves = 1
-        self.weights: Dict[str, float] = {"x": 0.5, "y": 0.5}
-        self.bands: List[TerrainBand] = []
-        self.mixture_weight_range: Tuple[float, float] = (0.25, 1.0)
         self._heightmap: Optional[HeightGrid] = None
         self._relief: Optional[FloatGrid] = None
         self._configure(settings if settings is not None else get("generation"))
