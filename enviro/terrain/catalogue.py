@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from statistics import median
-from typing import Dict, List
+from typing import Dict, List, Optional
 from ..config import get
 
 #: Sentinel name for unsurveyed ground. Not a physical terrain.
@@ -80,11 +80,12 @@ def build_registry(entries: Dict) -> Dict[str, Terrain]:
 #: Name to terrain
 TERRAIN: Dict[str, Terrain] = build_registry(get("terrain"))
 
-def terrain(name: str) -> Terrain:
+def terrain(name: str, registry: Optional[Dict[str, Terrain]] = None) -> Terrain:
     """Look up a terrain by name.
 
     Args:
         name: Registry key. ``UNKNOWN`` resolves to the sentinel.
+        registry: Registry to look in. Defaults to the default config's.
 
     Returns:
         The terrain.
@@ -92,12 +93,14 @@ def terrain(name: str) -> Terrain:
     Raises:
         KeyError: No such terrain. The message lists what exists.
     """
+    registry = registry if registry is not None else TERRAIN
     try:
-        return TERRAIN[name]
+        return registry[name]
     except KeyError:
-        raise KeyError(f"Unknown terrain {name!r}. Available: {sorted(TERRAIN)}") from None
+        raise KeyError(f"Unknown terrain {name!r}. Available: {sorted(registry)}") from None
 
-def terrain_names() -> List[str]:
+def terrain_names(registry: Optional[Dict[str, Terrain]] = None) -> List[str]:
     """Declared terrain names, excluding the unsurveyed sentinel."""
-    return [name for name in TERRAIN if name != UNKNOWN]
+    registry = registry if registry is not None else TERRAIN
+    return [name for name in registry if name != UNKNOWN]
 
