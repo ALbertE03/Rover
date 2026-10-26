@@ -4,9 +4,9 @@ Generador determinista de mapas 3D para simular un rover explorador.
 La misma semilla produce siempre el mismo mapa.
 
 ```python
-from enviro.terrain import generate
+from enviro.terrain import InstanceParams, MapGenerator
 
-mapa = generate(42)
+mapa = MapGenerator(InstanceParams.from_config(seed=42)).create()
 ```
 
 ## El pipeline
