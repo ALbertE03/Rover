@@ -4,9 +4,9 @@ Generador determinista de terrenos 3D sintéticos para simular un rover explorad
 La misma semilla produce siempre el mismo mapa.
 
 ```python
-from enviro.terrain import generate
+from enviro.terrain import InstanceParams, MapGenerator
 
-mapa = generate(42)
+mapa = MapGenerator(InstanceParams.from_config(seed=42)).create()
 print(len(mapa.cells), "celdas ·", len(mapa.pois), "POIs ·", len(mapa.stations), "estaciones")
 ```
 
@@ -40,14 +40,14 @@ es profunda: los diccionarios anidados se mezclan clave a clave, y las listas
 y escalares reemplazan al valor por defecto (no se concatenan).
 
 ```python
-from enviro.terrain import generate
+from enviro.terrain import InstanceParams, MapGenerator
 
 # Solo cambia lo que manda; el resto sigue siendo el config por defecto.
-mapa = generate(42, config={
+mapa = MapGenerator(InstanceParams.from_config(seed=42, config={
     "generation": {"relief_amplitude": 1.0},  # relieve completo siempre
     "map": {"width": 20},
     "terrain": {"plain": {"cost": 50.0}},  # visibility y glyph de plain se conservan
-})
+})).create()
 ```
 
 Un archivo parcial también vale, con la misma regla, vía `config_path`:
@@ -116,7 +116,7 @@ que lo elijan como dominante.
 │   ├── README.md            # explicación paso a paso de la generación
 │   ├── config.py            # carga del JSON
 │   └── terrain/
-│       ├── generate.py      # generate() + MapGenerator (el pipeline)
+│       ├── generate.py      # InstanceParams.from_config + MapGenerator (el pipeline)
 │       ├── field.py         # ruidos, heightmap, tipos de suelo
 │       ├── instance.py      # Map / MapParams (contenedores de datos)
 │       ├── grid.py          # celdas, distancias, vecindarios
