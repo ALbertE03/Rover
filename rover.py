@@ -78,6 +78,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from búsqueda.a_start import AStarResult, a_star, height_heuristic
+from búsqueda.bfs import breadth_first
+from búsqueda.dijkstra import dijkstra
+from búsqueda.greedy import greedy_best_first
 from enviro.terrain.catalogue import TERRAIN, UNKNOWN, terrain
 from enviro.terrain.grid import (
     Coord,
@@ -157,27 +160,62 @@ def plan_route(
     known: Dict[str, str],
     registry: Dict,
     climb_penalty: float,
+    algoritmo: str = "a_star",
 ) -> Optional[AStarResult]:
-    """Cheapest planned route from ``start`` to ``goal`` (or ``None``)."""
-    traversable = build_neighbours(cells, offsets)
-    # A destination is traversable for A* if it is a neighbour of some
-    # cell; the neighbour function already filters blocked/air cells, so
-    # the traversable predicate only needs to check the cell itself.
-    min_cost = min(
-        t.cost for t in registry.values() if t.name != UNKNOWN
-    )
+    """Planned route from ``start`` to ``goal`` with ``algoritmo``.
+
+    ``algoritmo`` is one of ``"a_star"``, ``"dijkstra"``, ``"greedy"``
+    or ``"bfs"``. All four share the same neighbours, traversable cells
+    and step costs, so a comparison between them varies only the search
+    itself, not the map or the cost model. A* and Dijkstra guarantee the
+    cheapest planned route; greedy and BFS do not, which is the point
+    of comparing them.
+    """
+    neighbours = build_neighbours(cells, offsets)
+    min_cost = min(t.cost for t in registry.values() if t.name != UNKNOWN)
 
     def is_traversable(coord: Coord) -> bool:
         cell = cells.get(cell_id(*coord))
         return cell is not None and cell.traversable
 
-    return a_star(
-        start,
-        goal,
-        neighbours=traversable,
-        traversable=is_traversable,
-        step_cost=build_planned_cost(known, registry, climb_penalty),
-        heuristic=height_heuristic(min_cost, climb_penalty),
+    cost_fn = build_planned_cost(known, registry, climb_penalty)
+    if algoritmo == "a_star":
+        return a_star(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+            heuristic=height_heuristic(min_cost, climb_penalty),
+        )
+    if algoritmo == "dijkstra":
+        return dijkstra(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+        )
+    if algoritmo == "greedy":
+        return greedy_best_first(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+            heuristic=lambda c, g: distance(c, g) * min_cost,
+        )
+    if algoritmo == "bfs":
+        return breadth_first(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+        )
+    raise ValueError(
+        f"unknown search algorithm {algoritmo!r}; expected 'a_star', "
+        "'dijkstra', 'greedy' or 'bfs'"
     )
 
 
@@ -198,6 +236,7 @@ class Rover:
 
     mapa: Map
     registry: Dict = field(default_factory=lambda: dict(TERRAIN))
+    algoritmo_busqueda: str = "a_star"
     pos: Coord = field(init=False)
     battery: float = field(init=False)
     memory_used: float = field(init=False)
@@ -207,6 +246,8 @@ class Rover:
     steps: int = field(default=0, init=False)
     recharges: int = field(default=0, init=False)
     transmits: int = field(default=0, init=False)
+    expanded_total: int = field(default=0, init=False)
+    bateria_gastada_total: float = field(default=0.0, init=False)
     # POI ids by stage. A POI is in exactly one of these (or nowhere).
     _raw: List[str] = field(default_factory=list, init=False)
     _analysed: List[str] = field(default_factory=list, init=False)
@@ -346,6 +387,7 @@ class Rover:
             self.known,
             self.registry,
             params.climb_penalty,
+            algoritmo=self.algoritmo_busqueda,
         )
 
     def planned_leg_cost(self, start: Coord, goal: Coord) -> Optional[float]:
@@ -358,6 +400,7 @@ class Rover:
             self.known,
             self.registry,
             params.climb_penalty,
+            algoritmo=self.algoritmo_busqueda,
         )
         return result.cost if result is not None else None
 
@@ -381,6 +424,7 @@ class Rover:
             result = self.planned_route(goal)
             if result is None or len(result.path) < 2:
                 return False, taken, spent
+            self.expanded_total += result.expanded
             nxt = result.path[1]
             cost = self.actual_step_cost(self.pos, nxt)
             if cost > self.battery:
@@ -390,6 +434,7 @@ class Rover:
             taken.append(nxt)
             self.steps += 1
             self.battery -= cost
+            self.bateria_gastada_total += cost
             spent += cost
             if len(taken) > max_steps:
                 return False, taken, spent
@@ -513,54 +558,112 @@ class Rover:
 def ejecutar_mision(
     semilla: int = 42,
     config: Optional[Dict] = None,
-    iteraciones_sa: int = 300,
+    iteraciones_sa: Optional[int] = None,
     semilla_sa: int = 7,
+    algoritmo_busqueda: str = "a_star",
+    metaheuristica: str = "simulated_annealing",
+    presupuesto_evaluaciones: int = 300,
+    semilla_metaheuristica: Optional[int] = None,
 ) -> Dict:
     """Run one full mission and return a report.
 
-    Wiring: the metaheuristic (simulated annealing) proposes a POI order
-    from the knowledge available at the start; the planner turns that
-    order into high-level actions; the rover executes them, resolving
-    every displacement with A* and surveying as it goes.
+    Wiring: the metaheuristic proposes a POI order from the knowledge
+    available at the start; the planner turns that order into high-level
+    actions; the rover executes them, resolving every displacement with
+    the chosen search algorithm and surveying as it goes.
+
+    Args:
+        metaheuristica: ``"simulated_annealing"``, ``"genetico"``,
+            ``"tabu"`` or ``"ninguna"`` (fixed interest-descending order,
+            no metaheuristic; the mission is then deterministic).
+        presupuesto_evaluaciones: Evaluation budget shared by every
+            metaheuristic in a comparison, so no metaheuristic wins by
+            simply evaluating more orders. For simulated annealing it
+            means ``presupuesto - 1`` iterations plus the initial
+            evaluation; the genetic algorithm and tabu search stop
+            exactly at this many evaluations.
     """
+    import time
+
     # Lazy imports: the planner needs a Rover and the rover needs the
     # planner only for this wiring function.
-    from metaheuristica import SimulatedAnnealing
+    from metaheuristica import (
+        AlgoritmoGenetico,
+        BusquedaTabu,
+        SimulatedAnnealing,
+    )
     from planificacion import Planificador, evaluar_orden
 
     from enviro.terrain import InstanceParams, MapGenerator
 
+    inicio = time.perf_counter()
     mapa = MapGenerator(
         InstanceParams.from_config(seed=semilla, config=config)
     ).create()
-    rover = Rover(mapa)
+    rover = Rover(mapa, algoritmo_busqueda=algoritmo_busqueda)
     conocidos_inicio = dict(rover.known)
     pois = list(mapa.pois.keys())
     orden_inicial = sorted(pois, key=lambda p: -mapa.pois[p].interest)
 
     def evaluar(orden: List[str]) -> float:
         return evaluar_orden(
-            orden, mapa, conocidos_inicio, rover.registry
+            orden,
+            mapa,
+            conocidos_inicio,
+            rover.registry,
+            algoritmo=algoritmo_busqueda,
         )[0]
 
     puntuacion_inicial = evaluar(orden_inicial)
-    sa = SimulatedAnnealing(
-        evaluar,
-        iteraciones=iteraciones_sa,
-        semilla=semilla_sa,
+    semilla_meta = (
+        semilla_metaheuristica if semilla_metaheuristica is not None else semilla_sa
     )
-    mejor_orden, mejor_puntuacion, _historial = sa.optimizar(orden_inicial)
+    if metaheuristica == "ninguna":
+        mejor_orden, mejor_puntuacion = orden_inicial, puntuacion_inicial
+    elif metaheuristica == "simulated_annealing":
+        iteraciones = (
+            iteraciones_sa
+            if iteraciones_sa is not None
+            else max(0, presupuesto_evaluaciones - 1)
+        )
+        sa = SimulatedAnnealing(
+            evaluar, iteraciones=iteraciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = sa.optimizar(orden_inicial)
+    elif metaheuristica == "genetico":
+        ga = AlgoritmoGenetico(
+            evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = ga.optimizar(orden_inicial)
+    elif metaheuristica == "tabu":
+        tabu = BusquedaTabu(
+            evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = tabu.optimizar(orden_inicial)
+    else:
+        raise ValueError(
+            f"unknown metaheuristic {metaheuristica!r}; expected "
+            "'simulated_annealing', 'genetico', 'tabu' or 'ninguna'"
+        )
     planificador = Planificador(rover)
     plan = planificador.planificar(mejor_orden)
     traza = planificador.ejecutar(rover, plan.acciones)
+    duracion = time.perf_counter() - inicio
 
     return {
         "semilla": semilla,
+        "algoritmo_busqueda": algoritmo_busqueda,
+        "metaheuristica": metaheuristica,
+        "presupuesto_evaluaciones": (
+            presupuesto_evaluaciones if metaheuristica != "ninguna" else 0
+        ),
         "estacion_base": rover.base.center,
         "orden_inicial": orden_inicial,
         "puntuacion_inicial": round(puntuacion_inicial, 2),
         "orden_sa": mejor_orden,
+        "orden_final": mejor_orden,
         "puntuacion_sa": round(mejor_puntuacion, 2),
+        "puntuacion_final": round(mejor_puntuacion, 2),
         "pois_omitidos_en_plan": plan.pois_omitidos,
         "acciones": [str(a) for a in plan.acciones],
         "traza": traza,
@@ -571,6 +674,9 @@ def ejecutar_mision(
         ),
         "pasos": rover.steps,
         "bateria_final": round(rover.battery, 1),
+        "bateria_gastada_total": round(rover.bateria_gastada_total, 1),
+        "nodos_expandidos": rover.expanded_total,
+        "tiempo_segundos": round(duracion, 3),
         "recargas": rover.recharges,
         "transmisiones": rover.transmits,
         "celdas_conocidas": len(rover.known),
@@ -588,8 +694,11 @@ def _main(argv: List[str]) -> int:
         f"-> puntuación {informe['puntuacion_inicial']}"
     )
     print(
-        f"Orden tras simulated annealing: {informe['orden_sa']} "
-        f"-> puntuación {informe['puntuacion_sa']}"
+        f"Orden tras {informe['metaheuristica']}: {informe['orden_final']} "
+        f"-> puntuación {informe['puntuacion_final']} "
+        f"(búsqueda: {informe['algoritmo_busqueda']}, "
+        f"{informe['tiempo_segundos']} s, "
+        f"{informe['nodos_expandidos']} nodos expandidos)"
     )
     if informe["pois_omitidos_en_plan"]:
         print(f"POIs omitidos en el plan: {informe['pois_omitidos_en_plan']}")

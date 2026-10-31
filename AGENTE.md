@@ -6,14 +6,21 @@ consume los mapas que genera, no cambia cómo se generan.
 ## Archivos
 
 ```
-búsqueda/a_start.py   # A* genérico (no sabe nada de mapas)
+búsqueda/a_start.py   # A*
+búsqueda/dijkstra.py  # Dijkstra (A* con heurística 0)
+búsqueda/greedy.py    # greedy best-first (solo heurística)
+búsqueda/bfs.py       # BFS (menos pasos, sin mirar el coste)
 rover.py              # el rover: conocimiento, survey, batería, acciones
-metaheuristica.py     # una sola metaheurística: simulated annealing
+metaheuristica.py     # SA, algoritmo genético y búsqueda tabú
 planificacion.py      # planificación simbólica (apartado B, no C)
+estadistica.py        # media, dispersión, IC95, "¿hacen falta más datos?"
+experimento.py        # comparación con protocolo experimental
 AGENTE.md             # este documento
 ```
 
-Se ejecuta con `python rover.py [semilla]` (por defecto, 42).
+Se ejecuta con `python rover.py [semilla]` (por defecto, 42) para una
+misión, y con `python experimento.py` para la comparación (versión
+rápida) o `python experimento.py --completo` para la versión larga.
 
 ## Apartado elegido: B (planificación), no C (CSP)
 
@@ -36,12 +43,60 @@ existe).
 1. El rover empieza en la base (primera estación, id `"base"`).
 2. Conoce desde el inicio solo la posición de los POIs y de las
    estaciones. El resto lo desbloquea observando.
-3. La metaheurística (simulated annealing) propone un orden de visita
-   de los POIs, evaluado con costes A* planificados, desvíos de recarga
-   y desvíos de transmisión.
+3. La metaheurística elegida propone un orden de visita de los POIs,
+   evaluado con costes planificados, desvíos de recarga y desvíos de
+   transmisión.
 4. El planificador convierte ese orden en acciones de alto nivel.
-5. El rover ejecuta las acciones; cada `mover_a` se resuelve con A*,
-   replanificando paso a paso a medida que el survey revela terreno.
+5. El rover ejecuta las acciones; cada `mover_a` se resuelve con el
+   algoritmo de búsqueda elegido, replanificando paso a paso a medida
+   que el survey revela terreno.
+
+## Reglas del planificador
+
+Estas son todas las reglas que el planificador aplica, sin excepciones
+ocultas:
+
+1. **Orden dado, no buscado.** El planificador no busca un orden de
+   POIs: recibe el orden de la metaheurística (o el orden fijo por
+   interés descendente si no hay metaheurística) y lo respeta.
+2. **Un POI, cuatro acciones.** Por cada POI del orden, en este orden
+   estricto: `mover_a` a su celda, `recolectar`, `analizar`. La
+   transmisión no va por POI, va por lote (regla 4).
+3. **POI sin ruta, POI omitido.** Si no hay ruta planificada al POI, o
+   no hay estación alcanzable desde el POI (para entregar después), el
+   POI se omite y la misión sigue con el siguiente. Nunca se rompe la
+   misión por un POI.
+4. **Memoria llena, desvío a estación.** Antes de recoger un POI, si la
+   memoria no tiene sitio para una muestra más (capacidad 2.0, una
+   muestra por POI), el plan inserta: `mover_a` a la estación
+   alcanzable más barata, `transmitir`, `recargar`. Solo entonces se
+   sigue al POI.
+5. **Batería con reserva, desvío a recargar.** Antes de un tramo, si la
+   batería no cubre el tramo más una reserva (el coste hasta la
+   estación alcanzable más barata desde el destino), el plan inserta:
+   `mover_a` a la estación alcanzable más barata desde la posición
+   actual, `recargar`. La reserva es la regla que evita que el rover
+   se quede tirado en un POI sin poder volver a transmitir.
+6. **Estación alcanzable, no cercana.** "La estación más barata" se
+   mide siempre por coste de ruta planificada, nunca por distancia en
+   línea recta. Una estación cercana en línea recta puede estar en un
+   componente desconectado y ser inútil (la relay de la semilla 42).
+   Si ninguna estación es alcanzable, el POI se omite (regla 3).
+7. **Cierre en estación.** Al final, siempre: `mover_a` a la estación
+   alcanzable más barata, `transmitir` si queda algo en el buffer y
+   `recargar`. Si no hay estación alcanzable al final, la misión
+   termina con las muestras sin entregar, y el informe lo muestra así
+   (no se inventa una entrega).
+8. **Fallo en ejecución, no en el plan.** El plan se construye con
+   costes planificados, pero la ejecución gasta costes reales, así que
+   un tramo puede fallar en ejecución (sin ruta tras observar, o sin
+   batería para el siguiente paso). En ese caso, la ejecución marca
+   ese POI como saltado: se omiten su `recolectar` y su `analizar`,
+   pero el resto del plan sigue (incluidas las transmisiones en
+   estación). Un fallo nunca aborta la misión entera.
+9. **Precondiciones antes de cada acción.** Cada acción comprueba sus
+   precondiciones en ejecución (tabla siguiente) y, si no se cumplen,
+   se reporta como fallo en la traza en vez de aplicarse en silencio.
 
 ## Acciones, precondiciones y efectos
 
@@ -103,25 +158,83 @@ por distancia en línea recta: una estación puede ser la más cercana y
 estar en un componente desconectado (la relay de la semilla 42, por
 ejemplo, es transitable pero inalcanzable desde la base).
 
-## Metaheurística: simulated annealing (una sola, por ahora)
+## Algoritmos de búsqueda: A*, Dijkstra, greedy, BFS
 
-Busca el orden de visita de los POIs. Su vecino es un intercambio de
-dos POIs (a veces, una inversión de segmento) y su aceptación es
-probabilística: acepta siempre una mejora y acepta un empeoramiento con
-probabilidad `exp((nuevo - actual) / T)`, con `T` enfriándose
-geométricamente. Ahí vive la probabilidad del objetivo: el interés de
-cada POI viene del mapa y no es aleatorio, pero la *elección* del orden
-sí lo es, y los órdenes de alto interés tienen más probabilidad de
-sobrevivir sin estar garantizados. La puntuación que evalúa es
-`interés * 100 - coste_de_viaje`: el interés domina y el coste solo
-desempata órdenes con el mismo interés. El mejor orden visto nunca se
-devuelve siempre, así que el resultado nunca es peor que el orden
-inicial (POIs ordenados por interés descendente).
+Los cuatro comparten vecinos, celdas transitables y costes de paso, así
+que una comparación entre ellos varía solo la búsqueda, no el mapa ni
+el modelo de coste. El rover elige con `algoritmo_busqueda`:
 
-Limitación conocida: el annealing busca órdenes, no subconjuntos. Un POI
-alcanzable se recoge aunque su interés sea 0, si la batería lo permite;
-descartar POIs por eficiencia es trabajo futuro, no un error de la
-versión actual.
+- **A***: coste pagado + heurística de altura (admisible, ver
+  `búsqueda/a_start.py`). Garantiza la ruta planificada más barata.
+- **Dijkstra**: A* con heurística 0. Garantiza lo mismo que A*, pero
+  suele expandir más nodos porque no tiene dirección hacia el objetivo.
+- **Greedy best-first**: solo heurística (distancia euclídea), sin
+  mirar el coste pagado. Rápido y con pocos nodos expandidos, pero su
+  ruta no tiene por qué ser la más barata.
+- **BFS**: menos pasos, sin mirar el coste. Su ruta puede ser la más
+  cara en batería aunque tenga los mismos pasos que las demás.
+
+## Metaheurísticas: SA, genético y tabú
+
+Las tres buscan el orden de visita de los POIs, con la misma interfaz
+y el mismo presupuesto de evaluaciones (ver el protocolo abajo):
+
+- **Simulated annealing**: un orden, vecino por intercambio (a veces
+  inversión de segmento), aceptación probabilística
+  `exp((nuevo - actual) / T)` con `T` enfriándose. Ahí vive la
+  probabilidad del objetivo: el interés de cada POI viene del mapa y
+  no es aleatorio, pero la *elección* del orden sí lo es.
+- **Algoritmo genético**: población de 20 órdenes, selección por
+  torneo, cruce de orden (un segmento de un padre y el resto en el
+  orden del otro, para que el hijo siga siendo una permutación válida)
+  y mutación por intercambio, con elitismo (los 2 mejores sobreviven).
+- **Búsqueda tabú**: un orden, 20 vecinos por iteración, y una memoria
+  de los últimos intercambios prohibidos durante 10 iteraciones (con
+  aspiración: un movimiento tabú que mejora el mejor global sí se
+  permite), para no deshacer el último paso y ciclar entre dos órdenes.
+
+La puntuación que evalúan las tres es `interés * 100 - coste_de_viaje`:
+el interés domina y el coste solo desempata órdenes con el mismo
+interés. Las tres devuelven siempre el mejor orden visto, así que
+ninguna puede ser peor que el orden inicial (POIs por interés
+descendente).
+
+Limitación conocida: buscan órdenes, no subconjuntos. Un POI alcanzable
+se recoge aunque su interés sea 0, si la batería lo permite; descartar
+POIs por eficiencia es trabajo futuro, no un error de la versión actual.
+
+## Protocolo experimental (`estadistica.py`, `experimento.py`)
+
+- **Instancias variadas**: 12x12 por defecto (semillas 42, 0, 3), 16x16,
+  bloqueos altos con más lava, y la semilla 7 de relieve bajo. Una
+  instancia es un par (semilla de mapa, config), con nombre que dice
+  qué varía.
+- **Corridas declaradas**: los buscadores son deterministas, una
+  corrida por instancia (con su tiempo igualmente reportado). Las
+  metaheurísticas corren varias veces por instancia con semillas
+  declaradas (por defecto 7, 11, 13, 17, 19).
+- **Presupuesto fijo e igual**: todas las metaheurísticas reciben
+  exactamente el mismo número de evaluaciones de órdenes en cada
+  corrida. Los buscadores reciben una misión por instancia, con el
+  mismo orden, planificador y mapas.
+- **Media y dispersión, nunca el mejor**: cada instancia se resume
+  primero, y el resumen general es sobre las medias por instancia (no
+  se mezclan corridas de instancias distintas). Cada fila de la tabla
+  lleva n, media, desviación, mediana, min/max e IC95.
+- **Cuántas corridas bastan**: no hay un número mágico. `estadistica`
+  avisa cuando el CV supera 0.20 o el ancho del IC95 relativo supera
+  0.40 (umbrales declarados, cambiables), y cuando dos IC95 se solapan
+  la conclusión es "no se distinguen con esta evidencia", no "son
+  iguales".
+- **Conclusión que no excede los números**: en la versión rápida, el
+  interés entregado no distingue a nadie, porque todos entregan los
+  mismos POIs alcanzables. Lo que distingue a los buscadores es la
+  batería gastada: A* y Dijkstra idénticos (como dice la teoría, ambos
+  óptimos), greedy y BFS más caros en cada instancia individual
+  (semilla 42: A* 93.3, greedy 101.9, BFS 104.7), aunque los IC95
+  generales se solapan porque las instancias difieren mucho entre sí.
+  Esa es la conclusión honesta con 3 instancias: el orden por instancia
+  se sostiene, la media general todavía no.
 
 ## Objetivo
 
@@ -140,3 +253,34 @@ solo se entrega 1 POI, y eso es correcto: los otros 4 solo son
 alcanzables desde la relay, que está en otro componente que la base, así
 que el rover que empieza en la base no puede llegar a ellos. El
 planificador los omite en vez de romper la misión.
+
+## Por qué la semilla 7 salió (casi) plana
+
+Corrección primero: en la demo anterior la semilla 7 salió *totalmente*
+plana (144 columnas a z=1) porque esa demo corría con el config local
+viejo, que todavía tenía `relief_amplitude [0.3, 0.4, 1.0]`. Con el
+config de main (`[0.5, 0.7, 1.0]`, el de la rama) la semilla 7 queda
+*casi* plana: 140 columnas a z=1 y 4 a z=2. El mecanismo es el mismo en
+los dos casos, solo cambia la amplitud:
+
+1. La semilla 7 dibuja la amplitud más baja de la lista. Con el config
+   viejo era 0.3; con el de main es 0.5 (el sorteo usa el mismo flujo
+   aleatorio, así que elige la misma posición de la lista en ambos).
+2. El campo combinado de ruidos se normaliza a [0, 1] y luego se
+   encoge alrededor de su media (0.532) multiplicando por la amplitud.
+   Con amplitud 0.3 el relieve queda en [0.373, 0.673]; con 0.5 queda en
+   [0.266, 0.766].
+3. La altura se cuantiza con `int(v * (depth - 1) + 0.5)` para depth 3,
+   o sea, umbrales en 0.25 y 0.75: por debajo de 0.25 es z=0, entre 0.25
+   y 0.75 es z=1, por encima de 0.75 es z=2.
+4. Con amplitud 0.3, *todo* el relieve cae dentro de (0.25, 0.75): todo
+   z=1, mapa totalmente plano. Con amplitud 0.5, casi todo sigue dentro
+   de esa banda y solo 4 columnas cruzan 0.75: 140 a z=1, 4 a z=2.
+
+No es un error de la semilla 7 ni un mapa roto: es lo que la calibración
+ya decía de la amplitud 0.5 (0% de mapas planos, siempre exactamente 2
+capas, ~2% de celdas en z=2; aquí 4/144 = 2.8%). La semilla 7 es, por
+tanto, una instancia legítima de relieve bajo, no una anomalía, y por
+eso está incluida como instancia en el experimento. Lo que sí es
+independiente del relieve es que sus POIs estén en otro componente que
+la base: eso es conectividad del mapa (rocas/lava), no altura.

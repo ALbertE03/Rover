@@ -99,6 +99,7 @@ def _leg_cost(
     mapa: Map,
     conocidos: Dict[str, str],
     registry: Dict,
+    algoritmo: str = "a_star",
 ) -> Optional[float]:
     params = mapa.params
     result: Optional[AStarResult] = plan_route(
@@ -109,6 +110,7 @@ def _leg_cost(
         conocidos,
         registry,
         params.climb_penalty,
+        algoritmo=algoritmo,
     )
     return result.cost if result is not None else None
 
@@ -118,6 +120,7 @@ def evaluar_orden(
     mapa: Map,
     conocidos: Dict[str, str],
     registry: Dict,
+    algoritmo: str = "a_star",
 ) -> Tuple[float, Dict]:
     """Score an order of POI ids, for the metaheuristic.
 
@@ -141,7 +144,7 @@ def evaluar_orden(
         """
         best: Optional[Tuple[Coord, float]] = None
         for station in stations:
-            cost = _leg_cost(coord, station, mapa, conocidos, registry)
+            cost = _leg_cost(coord, station, mapa, conocidos, registry, algoritmo)
             if cost is None:
                 continue
             if best is None or cost < best[1]:
@@ -156,7 +159,7 @@ def evaluar_orden(
     reached = 0
     for poi_id in orden:
         goal = parse_cell_id(mapa.pois[poi_id].cell_id)
-        leg = _leg_cost(pos, goal, mapa, conocidos, registry)
+        leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
         if leg is None:
             continue
         if memory + MEMORY_PER_POI > params.memory + 1e-9:
@@ -168,7 +171,7 @@ def evaluar_orden(
             pos = detour_coord
             battery = params.battery
             memory = 0.0
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry)
+            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
             if leg is None:
                 continue
         reserve_station = nearest_reachable(goal)
@@ -185,7 +188,7 @@ def evaluar_orden(
             travel += detour
             pos = detour_coord
             battery = params.battery
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry)
+            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
             if leg is None:
                 continue
         travel += leg
@@ -220,6 +223,7 @@ class Planificador:
         params = mapa.params
         registry = self.rover.registry
         conocidos = dict(self.rover.known)
+        algoritmo = self.rover.algoritmo_busqueda
         pos = self.rover.pos
         battery = self.rover.battery
         memory = self.rover.memory_used
@@ -233,7 +237,7 @@ class Planificador:
 
         def ir_a(dest: Coord) -> bool:
             nonlocal pos, battery
-            leg = _leg_cost(pos, dest, mapa, conocidos, registry)
+            leg = _leg_cost(pos, dest, mapa, conocidos, registry, algoritmo)
             if leg is None:
                 return False
             acciones.append(Action("mover_a", dest))
@@ -252,7 +256,7 @@ class Planificador:
                 acciones.append(Action("recargar"))
                 memory = 0.0
                 battery = params.battery
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry)
+            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
             if leg is None:
                 omitidos.append(poi_id)
                 continue
@@ -260,7 +264,7 @@ class Planificador:
             if station_goal is None:
                 omitidos.append(poi_id)
                 continue
-            reserve = _leg_cost(goal, station_goal, mapa, conocidos, registry)
+            reserve = _leg_cost(goal, station_goal, mapa, conocidos, registry, algoritmo)
             reserve = reserve if reserve is not None else 0.0
             if leg + reserve > battery:
                 station = estacion_cercana(pos)
@@ -269,7 +273,7 @@ class Planificador:
                     continue
                 acciones.append(Action("recargar"))
                 battery = params.battery
-                leg = _leg_cost(pos, goal, mapa, conocidos, registry)
+                leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
                 if leg is None:
                     omitidos.append(poi_id)
                     continue
