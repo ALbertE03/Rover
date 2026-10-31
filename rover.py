@@ -1,0 +1,616 @@
+"""Rover agent integrated with the generated terrain.
+
+Knowledge model (read this before changing anything)
+----------------------------------------------------
+The rover starts at the base station (the first station of the map, id
+``"base"``). From the start it knows only three things: the position of
+every point of interest, the position of every station (base and relays),
+and the shape of the map in the sense the generator itself documents:
+blocked cells are visible from anywhere ("obstacles are large"), while
+the terrain under the wheels is not. What the rover does *not* know is
+the terrain type of a cell, and therefore its travel cost, until it has
+surveyed that cell. "Unlocking" a cell in this module means revealing its
+terrain type, not unblocking it: a blocked cell stays blocked.
+
+Survey (visibility + height)
+-----------------------------
+Standing on a cell, the rover first learns that cell's own terrain, then
+reveals the cells around it within a survey radius that grows with height
+and shrinks with the visibility of the terrain it is standing on:
+
+    base_radius = move_radius + survey_height_bonus * z / (depth - 1)
+    survey_radius = base_radius * visibility(standing terrain)
+
+Plain (visibility 0.9) therefore reveals noticeably more than crevasse
+(0.35), and a high position reveals more than a low one. Unknown terrain
+costs ``UNKNOWN`` (2.2 in the default catalogue, the median) while it is
+being planned over.
+
+Battery
+-------
+The battery is a real budget, not a label: the map only carries it. A step
+costs, in battery:
+
+* 0 if it goes downhill (``dz < 0``): descending never spends battery,
+  whatever the terrain;
+* the true terrain cost of the destination cell otherwise, plus
+  ``climb_penalty`` per level gained when ``dz > 0``.
+
+Note the difference between planned and actual cost. A* plans with the
+*known* cost (unknown cells at 2.2); the rover actually spends the *true*
+cost when it steps. A shortcut through unknown ground can therefore turn
+out cheaper (plain, 1.0) or more expensive (crevasse, 3.2) than planned.
+That gap is exactly the exploration/exploitation trade-off discussed in
+the agent notes, not a bug in the map.
+
+Stations recharge
+-----------------
+Stations are communication stations (radius 0: the rover must stand on
+the station cell to use it) and, in this agent, they also recharge the
+battery: the ``recargar`` action, only available at a station, restores
+the battery to full. Starting at base, the rover therefore starts with a
+full battery and can always refuel by returning to a station it can reach.
+
+Memory and the collect/analyse/transmit chain
+--------------------------------------------
+Each collected point of interest occupies 1.0 unit of sample memory
+(``MapParams.memory`` is a budget in those units; the generator does not
+define the unit, so this module does). The chain is forced by
+preconditions, in this order: ``recolectar`` (at the POI cell, with free
+memory) -> ``analizar`` (turns raw samples into analysed samples) ->
+``transmitir`` (only at a station, frees the memory and turns analysed
+samples into delivered interest). The mission objective is the delivered
+interest: interest that was collected but never transmitted does not
+count, because the data never reached a station.
+
+This module does not import the planner or the metaheuristic at the top
+level (they both need a Rover, so importing them here would be circular).
+:func:`ejecutar_mision` imports them lazily and wires the three pieces
+together: metaheuristic proposes a POI order, planner turns it into
+high-level actions, A* (through :meth:`Rover.move_to`) resolves every
+displacement.
+"""
+
+from __future__ import annotations
+
+import sys
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple
+
+from búsqueda.a_start import AStarResult, a_star, height_heuristic
+from enviro.terrain.catalogue import TERRAIN, UNKNOWN, terrain
+from enviro.terrain.grid import (
+    Coord,
+    cell_id,
+    distance,
+    movement_offsets,
+    neighbour_offsets,
+    parse_cell_id,
+)
+from enviro.terrain.instance import Map
+
+# One collected point of interest occupies this much sample memory.
+MEMORY_PER_POI = 1.0
+
+
+class PreconditionError(ValueError):
+    """An action was attempted whose preconditions do not hold."""
+
+
+# ---------------------------------------------------------------------------
+# Pure planning helpers (no Rover state): shared by Rover.move_to and by the
+# planner's order evaluation, so both plan with exactly the same costs.
+# ---------------------------------------------------------------------------
+
+
+def build_neighbours(
+    cells: Dict, offsets: Tuple[Coord, ...]
+) -> Callable[[Coord], List[Coord]]:
+    """Neighbour coordinates a rover may step to from a coordinate.
+
+    A destination must be a real cell of the map and must not be blocked.
+    Blocked status is global knowledge here (see the module docstring).
+    """
+
+    def neighbours(current: Coord) -> List[Coord]:
+        x, y, z = current
+        out = []
+        for dx, dy, dz in offsets:
+            dest = (x + dx, y + dy, z + dz)
+            cell = cells.get(cell_id(*dest))
+            if cell is not None and cell.traversable:
+                out.append(dest)
+        return out
+
+    return neighbours
+
+
+def build_planned_cost(
+    known: Dict[str, str],
+    registry: Dict,
+    climb_penalty: float,
+) -> Callable[[Coord, Coord], float]:
+    """Step cost for planning, from the rover's current knowledge.
+
+    Unknown destination terrain costs ``UNKNOWN`` (2.2 by default).
+    Downhill steps cost 0; otherwise the cost is the known terrain cost
+    plus ``climb_penalty`` per level gained.
+    """
+    unknown_cost = terrain(UNKNOWN, registry).cost
+
+    def cost(current: Coord, dest: Coord) -> float:
+        dz = dest[2] - current[2]
+        if dz < 0:
+            return 0.0
+        name = known.get(cell_id(*dest))
+        ground = terrain(name, registry).cost if name else unknown_cost
+        return ground + climb_penalty * dz
+
+    return cost
+
+
+def plan_route(
+    start: Coord,
+    goal: Coord,
+    cells: Dict,
+    offsets: Tuple[Coord, ...],
+    known: Dict[str, str],
+    registry: Dict,
+    climb_penalty: float,
+) -> Optional[AStarResult]:
+    """Cheapest planned route from ``start`` to ``goal`` (or ``None``)."""
+    traversable = build_neighbours(cells, offsets)
+    # A destination is traversable for A* if it is a neighbour of some
+    # cell; the neighbour function already filters blocked/air cells, so
+    # the traversable predicate only needs to check the cell itself.
+    min_cost = min(
+        t.cost for t in registry.values() if t.name != UNKNOWN
+    )
+
+    def is_traversable(coord: Coord) -> bool:
+        cell = cells.get(cell_id(*coord))
+        return cell is not None and cell.traversable
+
+    return a_star(
+        start,
+        goal,
+        neighbours=traversable,
+        traversable=is_traversable,
+        step_cost=build_planned_cost(known, registry, climb_penalty),
+        heuristic=height_heuristic(min_cost, climb_penalty),
+    )
+
+
+@dataclass
+class Rover:
+    """A rover moving on a generated map, under partial observability.
+
+    Attributes:
+        mapa: The generated map (terrain, stations, POIs).
+        pos: Current coordinate. Starts at the base station.
+        battery: Remaining battery. Starts full.
+        memory_used: Sample memory currently occupied.
+        known: Cell id -> terrain name, for surveyed cells only.
+        delivered_interest: Interest already transmitted at a station.
+        path: Every coordinate stepped on, in order, including the start.
+        steps: Number of steps taken.
+    """
+
+    mapa: Map
+    registry: Dict = field(default_factory=lambda: dict(TERRAIN))
+    pos: Coord = field(init=False)
+    battery: float = field(init=False)
+    memory_used: float = field(init=False)
+    known: Dict[str, str] = field(default_factory=dict, init=False)
+    delivered_interest: float = field(default=0.0, init=False)
+    path: List[Coord] = field(default_factory=list, init=False)
+    steps: int = field(default=0, init=False)
+    recharges: int = field(default=0, init=False)
+    transmits: int = field(default=0, init=False)
+    # POI ids by stage. A POI is in exactly one of these (or nowhere).
+    _raw: List[str] = field(default_factory=list, init=False)
+    _analysed: List[str] = field(default_factory=list, init=False)
+    _delivered: List[str] = field(default_factory=list, init=False)
+    _collected: List[str] = field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        if not self.mapa.stations:
+            raise ValueError("the map has no stations; the rover has no base")
+        self.pos = self.mapa.stations[0].center
+        self.battery = self.mapa.params.battery
+        self.memory_used = 0.0
+        self.path = [self.pos]
+        self.survey()
+
+    # -- stations -----------------------------------------------------------
+
+    @property
+    def base(self):
+        return self.mapa.stations[0]
+
+    @property
+    def relays(self):
+        return self.mapa.stations[1:]
+
+    def station_at(self, coord: Coord):
+        for station in self.mapa.stations:
+            if station.center == coord:
+                return station
+        return None
+
+    def at_station(self) -> bool:
+        return self.station_at(self.pos) is not None
+
+    def nearest_station(self, coord: Coord):
+        return min(
+            self.mapa.stations, key=lambda s: (distance(coord, s.center), s.id)
+        )
+
+    def nearest_reachable_station(self, coord: Coord):
+        """Nearest station by planned A* cost, not by straight-line distance.
+
+        A station can be the closest in Euclidean distance and still be
+        unreachable (its component may be cut off by blocked cells, as
+        the relay is in seed 42). Detours must therefore use this method:
+        it returns ``(station, leg_cost)`` for the cheapest reachable
+        station, or ``None`` when no station can be reached from ``coord``.
+        """
+        best = None
+        for station in self.mapa.stations:
+            cost = self.planned_leg_cost(coord, station.center)
+            if cost is None:
+                continue
+            if best is None or cost < best[1]:
+                best = (station, cost)
+        return best
+
+    # -- survey ---------------------------------------------------------------
+
+    def survey_radius(self) -> float:
+        """Radius revealed from the current position.
+
+        Height raises it (``survey_height_bonus`` at the top layer) and
+        the visibility of the terrain underfoot scales it: plain reveals
+        more than crevasse.
+        """
+        params = self.mapa.params
+        if params.depth > 1:
+            height_fraction = self.pos[2] / (params.depth - 1)
+        else:
+            height_fraction = 0.0
+        base_radius = params.move_radius + (
+            params.survey_height_bonus * height_fraction
+        )
+        standing = self.known.get(cell_id(*self.pos))
+        if standing is None:
+            # The rover always knows the ground it stands on (survey()
+            # reveals it first); this is only a defensive fallback.
+            return base_radius
+        return base_radius * terrain(standing, self.registry).visibility
+
+    def survey(self) -> int:
+        """Reveal the terrain around the current position.
+
+        Returns the number of cells revealed for the first time.
+        """
+        # The ground underfoot is always revealed first, so the radius
+        # below is computed with a known visibility, never with UNKNOWN.
+        own = self.mapa.cells.get(cell_id(*self.pos))
+        if own is not None and cell_id(*self.pos) not in self.known:
+            self.known[cell_id(*self.pos)] = own.true_terrain
+            revealed = 1
+        else:
+            revealed = 0
+        radius = self.survey_radius()
+        if radius <= 0:
+            return revealed
+        for dx, dy, dz in neighbour_offsets(radius):
+            dest = (
+                self.pos[0] + dx,
+                self.pos[1] + dy,
+                self.pos[2] + dz,
+            )
+            dest_id = cell_id(*dest)
+            if dest_id in self.known:
+                continue
+            cell = self.mapa.cells.get(dest_id)
+            if cell is not None:
+                self.known[dest_id] = cell.true_terrain
+                revealed += 1
+        return revealed
+
+    # -- costs ----------------------------------------------------------------
+
+    def actual_step_cost(self, current: Coord, dest: Coord) -> float:
+        """Battery actually spent stepping from ``current`` to ``dest``.
+
+        Uses the true terrain, not the known one: the physical cost is
+        what it is, whether the rover had surveyed that cell or not.
+        Downhill steps cost 0.
+        """
+        dz = dest[2] - current[2]
+        if dz < 0:
+            return 0.0
+        cell = self.mapa.cells[cell_id(*dest)]
+        return terrain(cell.true_terrain, self.registry).cost + (
+            self.mapa.params.climb_penalty * dz
+        )
+
+    def planned_route(self, goal: Coord) -> Optional[AStarResult]:
+        params = self.mapa.params
+        return plan_route(
+            self.pos,
+            goal,
+            self.mapa.cells,
+            movement_offsets(params.move_radius, params.move_allow_diagonal),
+            self.known,
+            self.registry,
+            params.climb_penalty,
+        )
+
+    def planned_leg_cost(self, start: Coord, goal: Coord) -> Optional[float]:
+        params = self.mapa.params
+        result = plan_route(
+            start,
+            goal,
+            self.mapa.cells,
+            movement_offsets(params.move_radius, params.move_allow_diagonal),
+            self.known,
+            self.registry,
+            params.climb_penalty,
+        )
+        return result.cost if result is not None else None
+
+    # -- movement ---------------------------------------------------------------
+
+    def move_to(self, goal: Coord) -> Tuple[bool, List[Coord], float]:
+        """Walk to ``goal`` with online A* replanning, step by step.
+
+        After every step the rover surveys its new position and replans
+        from there, so a terrain cost revealed mid-route can change the
+        rest of the route. Returns ``(reached, steps_taken, battery_spent)``.
+        It returns ``reached=False`` (without raising) when there is no
+        planned route, or when the battery cannot pay for the next step:
+        the planner treats that POI as skipped and moves on.
+        """
+        taken: List[Coord] = []
+        spent = 0.0
+        max_steps = len(self.mapa.cells) * 4 + 100
+        while self.pos != goal:
+            self.survey()
+            result = self.planned_route(goal)
+            if result is None or len(result.path) < 2:
+                return False, taken, spent
+            nxt = result.path[1]
+            cost = self.actual_step_cost(self.pos, nxt)
+            if cost > self.battery:
+                return False, taken, spent
+            self.pos = nxt
+            self.path.append(nxt)
+            taken.append(nxt)
+            self.steps += 1
+            self.battery -= cost
+            spent += cost
+            if len(taken) > max_steps:
+                return False, taken, spent
+        self.survey()
+        return True, taken, spent
+
+    # -- high-level actions (preconditions + effects) ---------------------------
+
+    def poi_coord(self, poi_id: str) -> Coord:
+        return parse_cell_id(self.mapa.pois[poi_id].cell_id)
+
+    def poi_interest(self, poi_id: str) -> float:
+        return self.mapa.pois[poi_id].interest
+
+    def collect(self, poi_id: str) -> None:
+        """Preconditions: at the POI cell, POI not yet collected, free
+        memory. Effect: the POI enters the raw buffer, memory +1."""
+        if self.pos != self.poi_coord(poi_id):
+            raise PreconditionError(
+                f"collect {poi_id}: rover is at {self.pos}, "
+                f"POI is at {self.poi_coord(poi_id)}"
+            )
+        if poi_id in self._collected:
+            raise PreconditionError(f"collect {poi_id}: already collected")
+        if self.memory_used + MEMORY_PER_POI > self.mapa.params.memory + 1e-9:
+            raise PreconditionError(
+                f"collect {poi_id}: memory full "
+                f"({self.memory_used}/{self.mapa.params.memory}); "
+                "transmit at a station first"
+            )
+        self._raw.append(poi_id)
+        self._collected.append(poi_id)
+        self.memory_used += MEMORY_PER_POI
+
+    def analyse(self) -> None:
+        """Preconditions: at least one raw sample. Effect: raw samples
+        become analysed samples (memory unchanged)."""
+        if not self._raw:
+            raise PreconditionError("analyse: no raw samples to analyse")
+        self._analysed.extend(self._raw)
+        self._raw.clear()
+
+    def transmit(self) -> float:
+        """Preconditions: at a station, at least one analysed sample.
+        Effect: analysed samples are delivered, their memory is freed,
+        and their interest counts towards the objective. Returns the
+        interest delivered by this action."""
+        if not self.at_station():
+            raise PreconditionError("transmit: rover is not at a station")
+        if not self._analysed:
+            raise PreconditionError("transmit: no analysed samples to send")
+        interest = sum(self.poi_interest(p) for p in self._analysed)
+        self._delivered.extend(self._analysed)
+        self._analysed.clear()
+        # Delivered samples no longer occupy memory; raw samples still do.
+        self.memory_used = MEMORY_PER_POI * len(self._raw)
+        self.delivered_interest += interest
+        self.transmits += 1
+        return interest
+
+    def recharge(self) -> None:
+        """Preconditions: at a station. Effect: battery restored to full."""
+        if not self.at_station():
+            raise PreconditionError("recharge: rover is not at a station")
+        self.battery = self.mapa.params.battery
+        self.recharges += 1
+
+    def execute_action(self, action) -> str:
+        """Execute one high-level action object (duck-typed).
+
+        The action carries ``tipo`` (``"mover_a"``, ``"recolectar"``,
+        ``"analizar"``, ``"transmitir"`` or ``"recargar"``) and
+        ``objetivo`` (a coordinate for ``mover_a``, a POI id for
+        ``recolectar``, None otherwise). Returns a short trace line.
+        """
+        tipo = action.tipo
+        if tipo == "mover_a":
+            reached, taken, spent = self.move_to(action.objetivo)
+            if not reached:
+                raise PreconditionError(
+                    f"mover_a {action.objetivo}: no route or battery "
+                    "ran out mid-route"
+                )
+            return (
+                f"mover_a {action.objetivo}: {len(taken)} pasos, "
+                f"batería gastada {spent:.1f}, batería restante "
+                f"{self.battery:.1f}"
+            )
+        if tipo == "recolectar":
+            self.collect(action.objetivo)
+            return (
+                f"recolectar {action.objetivo}: interés "
+                f"{self.poi_interest(action.objetivo):.3f}, memoria "
+                f"{self.memory_used}/{self.mapa.params.memory}"
+            )
+        if tipo == "analizar":
+            self.analyse()
+            return "analizar: muestras en bruto -> analizadas"
+        if tipo == "transmitir":
+            interest = self.transmit()
+            return (
+                f"transmitir: interés entregado {interest:.3f}, total "
+                f"entregado {self.delivered_interest:.3f}"
+            )
+        if tipo == "recargar":
+            self.recharge()
+            return f"recargar: batería a {self.battery:.1f}"
+        raise ValueError(f"unknown action type {tipo!r}")
+
+    # -- mission wiring -----------------------------------------------------------
+
+    @property
+    def delivered_pois(self) -> List[str]:
+        return list(self._delivered)
+
+    @property
+    def collected_pois(self) -> List[str]:
+        return list(self._collected)
+
+
+def ejecutar_mision(
+    semilla: int = 42,
+    config: Optional[Dict] = None,
+    iteraciones_sa: int = 300,
+    semilla_sa: int = 7,
+) -> Dict:
+    """Run one full mission and return a report.
+
+    Wiring: the metaheuristic (simulated annealing) proposes a POI order
+    from the knowledge available at the start; the planner turns that
+    order into high-level actions; the rover executes them, resolving
+    every displacement with A* and surveying as it goes.
+    """
+    # Lazy imports: the planner needs a Rover and the rover needs the
+    # planner only for this wiring function.
+    from metaheuristica import SimulatedAnnealing
+    from planificacion import Planificador, evaluar_orden
+
+    from enviro.terrain import InstanceParams, MapGenerator
+
+    mapa = MapGenerator(
+        InstanceParams.from_config(seed=semilla, config=config)
+    ).create()
+    rover = Rover(mapa)
+    conocidos_inicio = dict(rover.known)
+    pois = list(mapa.pois.keys())
+    orden_inicial = sorted(pois, key=lambda p: -mapa.pois[p].interest)
+
+    def evaluar(orden: List[str]) -> float:
+        return evaluar_orden(
+            orden, mapa, conocidos_inicio, rover.registry
+        )[0]
+
+    puntuacion_inicial = evaluar(orden_inicial)
+    sa = SimulatedAnnealing(
+        evaluar,
+        iteraciones=iteraciones_sa,
+        semilla=semilla_sa,
+    )
+    mejor_orden, mejor_puntuacion, _historial = sa.optimizar(orden_inicial)
+    planificador = Planificador(rover)
+    plan = planificador.planificar(mejor_orden)
+    traza = planificador.ejecutar(rover, plan.acciones)
+
+    return {
+        "semilla": semilla,
+        "estacion_base": rover.base.center,
+        "orden_inicial": orden_inicial,
+        "puntuacion_inicial": round(puntuacion_inicial, 2),
+        "orden_sa": mejor_orden,
+        "puntuacion_sa": round(mejor_puntuacion, 2),
+        "pois_omitidos_en_plan": plan.pois_omitidos,
+        "acciones": [str(a) for a in plan.acciones],
+        "traza": traza,
+        "pois_entregados": rover.delivered_pois,
+        "interes_entregado": round(rover.delivered_interest, 3),
+        "interes_total_mapa": round(
+            sum(p.interest for p in mapa.pois.values()), 3
+        ),
+        "pasos": rover.steps,
+        "bateria_final": round(rover.battery, 1),
+        "recargas": rover.recharges,
+        "transmisiones": rover.transmits,
+        "celdas_conocidas": len(rover.known),
+        "celdas_totales": len(mapa.cells),
+    }
+
+
+def _main(argv: List[str]) -> int:
+    semilla = int(argv[1]) if len(argv) > 1 else 42
+    informe = ejecutar_mision(semilla=semilla)
+    print(f"Misión, semilla {informe['semilla']}")
+    print(f"Base: {informe['estacion_base']}")
+    print(
+        f"Orden inicial (por interés): {informe['orden_inicial']} "
+        f"-> puntuación {informe['puntuacion_inicial']}"
+    )
+    print(
+        f"Orden tras simulated annealing: {informe['orden_sa']} "
+        f"-> puntuación {informe['puntuacion_sa']}"
+    )
+    if informe["pois_omitidos_en_plan"]:
+        print(f"POIs omitidos en el plan: {informe['pois_omitidos_en_plan']}")
+    print("Plan:")
+    for accion in informe["acciones"]:
+        print(f"  - {accion}")
+    print("Ejecución:")
+    for linea in informe["traza"]:
+        print(f"  {linea}")
+    print(
+        f"Resultado: {len(informe['pois_entregados'])} POIs entregados, "
+        f"interés {informe['interes_entregado']} de "
+        f"{informe['interes_total_mapa']} en el mapa, "
+        f"{informe['pasos']} pasos, batería final "
+        f"{informe['bateria_final']}, {informe['recargas']} recargas, "
+        f"{informe['transmisiones']} transmisiones, "
+        f"{informe['celdas_conocidas']}/{informe['celdas_totales']} "
+        "celdas conocidas al final."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv))
