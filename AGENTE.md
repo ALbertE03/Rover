@@ -120,18 +120,41 @@ transmitir/recargar solo en estación.
 
 ## Conocimiento y survey
 
-El rover no conoce el terreno: al empezar solo sabe dónde están los
-POIs y las estaciones. Todo lo demás lo descubre poco a poco, parado
-en una celda y observando a su alrededor (ver la fórmula abajo). En
-concreto, de cada celda solo se sabe su tipo de terreno y si está
-bloqueada después de haberla observado con el survey, o después de
-haber intentado pisarla y descubrir que está bloqueada. Antes de eso,
-planificar sobre ella cuesta `UNKNOWN` (2.2) y se asume transitable de
-forma optimista: nunca se asume bloqueada sin haberla visto. Si ese
-optimismo falla en ejecución, el rover no se mueve ni gasta batería,
-solo aprende que esa celda está bloqueada y replanifica rodeándola.
-"Desbloquear" una celda significa aquí revelar su tipo de terreno y su
-bloqueo, no desbloquearla: una celda bloqueada sigue bloqueada.
+El rover, literalmente, solo conoce los POIs y las bases (estaciones)
+al empezar. Nada más: ni el tipo de terreno, ni si una celda está
+bloqueada, ni si hay una loma en una coordenada. Todo eso lo descubre
+poco a poco, parado en una celda y observando a su alrededor (ver la
+fórmula abajo). Observar una celda revela su posición (o sea, su
+altura: así descubre si hay lomas), su tipo de terreno y si está
+bloqueada.
+
+La ejecución (`move_to`) viaja solo sobre terreno descubierto: su
+grafo son las celdas observadas más la posición del POI o estación
+destino, que sí se conoce. Si el destino no es alcanzable por ese
+grafo, el rover se mueve por terreno descubierto hacia la celda
+alcanzable más cercana al destino que todavía tenga un vecino sin
+observar (la frontera) y observa desde ahí. Si él mismo es esa
+frontera, da un paso a ciegas al vecino sin observar más cercano al
+destino: si ahí no hay celda, lo aprende; si está bloqueada, lo
+aprende; si no, se mueve, paga el coste real y observa desde la
+nueva celda. El coste de un paso se comprueba antes con el coste
+planificado (conocido, o `UNKNOWN` 2.2 si la celda no está observada),
+nunca con el coste real de una celda sin observar; el coste real solo
+se descuenta después de pisarla.
+
+El planificador, en cambio, usa una estimación optimista (todas las
+celdas menos las bloqueadas conocidas, a coste `UNKNOWN` si no están
+observadas) para ordenar los POIs y decidir si un POI merece
+intentarse. Si ni siquiera con esa estimación hay ruta, el POI es
+de verdad inalcanzable y se omite; si la hay, puede que la ejecución
+descubra después que no lo era, y entonces se salta en ejecución.
+Los desvíos a estación no exploran: si no hay ruta por terreno
+descubierto a esa estación, fallan de inmediato sin gastar batería,
+para que el respaldo a otra estación todavía pueda correr. Y la
+exploración a un POI nunca gasta la batería de regreso: se detiene
+cuando la batería llega a la ruta conocida más barata a una estación
+más un margen de seguridad de 8.0 (ajustado a mano: un paso a coste
+máximo, 3.8, más el regreso que puede crecer otro paso, 3.8).
 
 Nota sobre estilo: los archivos del agente ya no llevan docstring de
 inicio, como los archivos de `enviro/` (que empiezan directamente con

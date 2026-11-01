@@ -168,6 +168,9 @@ class Rover:
         known: Cell id -> terrain name, for surveyed cells only.
         known_blocked: Cell ids known to be blocked, from survey or
             from a failed step attempt, never from the true map.
+        known_no_cell: Cell ids of coordinates where a step was
+            attempted and no cell turned out to exist (a hill that
+            was not there). Also discovered, never assumed.
         delivered_interest: Interest already transmitted at a station.
         path: Every coordinate stepped on, in order, including the start.
         steps: Number of steps taken.
@@ -181,6 +184,7 @@ class Rover:
     memory_used: float = field(init=False)
     known: Dict[str, str] = field(default_factory=dict, init=False)
     known_blocked: set = field(default_factory=set, init=False)
+    known_no_cell: set = field(default_factory=set, init=False)
     delivered_interest: float = field(default=0.0, init=False)
     path: List[Coord] = field(default_factory=list, init=False)
     steps: int = field(default=0, init=False)
@@ -324,6 +328,14 @@ class Rover:
         )
 
     def planned_route(self, goal: Coord) -> Optional[AStarResult]:
+        """Optimistic route estimate, for the planner only.
+
+        It plans over every cell except those known to be blocked, at
+        UNKNOWN cost for unsurveyed cells. The planner needs an
+        estimate to order POIs and to decide whether a POI is even
+        worth trying; the executor (``move_to``) never uses this
+        route, it only travels over discovered ground.
+        """
         params = self.mapa.params
         return plan_route(
             self.pos,
@@ -336,6 +348,120 @@ class Rover:
             algoritmo=self.algoritmo_busqueda,
             known_blocked=self.known_blocked,
         )
+
+    def known_positions(self) -> set:
+        """Coordinates the rover knows exist.
+
+        Surveyed cells (their position, hence their height, is what the
+        survey revealed) plus the POI and station positions, which are
+        known literally from the start. Nothing else is in this set:
+        a hill at a coordinate the rover has not surveyed is not here.
+        """
+        positions = {parse_cell_id(cid) for cid in self.known}
+        positions.update(s.center for s in self.mapa.stations)
+        positions.update(
+            parse_cell_id(p.cell_id) for p in self.mapa.pois.values()
+        )
+        return positions
+
+    def _known_route(
+        self, start: Coord, goal: Coord
+    ) -> Optional[AStarResult]:
+        """Route over discovered ground only, from ``start`` to ``goal``.
+
+        Nodes are ``known_positions`` plus the goal itself; a node is
+        excluded when it is known blocked or known to have no cell.
+        Step costs are the known terrain cost, or UNKNOWN for the
+        goal when it has not been surveyed yet.
+        """
+        params = self.mapa.params
+        offsets = movement_offsets(
+            params.move_radius, params.move_allow_diagonal
+        )
+        nodes = self.known_positions()
+        nodes.add(goal)
+
+        def neighbours(current: Coord) -> List[Coord]:
+            out = []
+            for dx, dy, dz in offsets:
+                dest = (current[0] + dx, current[1] + dy, current[2] + dz)
+                dest_id = cell_id(*dest)
+                if (
+                    dest in nodes
+                    and dest_id not in self.known_blocked
+                    and dest_id not in self.known_no_cell
+                ):
+                    out.append(dest)
+            return out
+
+        def traversable(coord: Coord) -> bool:
+            coord_id = cell_id(*coord)
+            return (
+                coord in nodes
+                and coord_id not in self.known_blocked
+                and coord_id not in self.known_no_cell
+            )
+
+        cost_fn = build_planned_cost(
+            self.known, self.registry, params.climb_penalty
+        )
+        min_cost = min(
+            t.cost for t in self.registry.values() if t.name != UNKNOWN
+        )
+        if self.algoritmo_busqueda == "a_star":
+            return a_star(
+                start,
+                goal,
+                neighbours=neighbours,
+                traversable=traversable,
+                step_cost=cost_fn,
+                heuristic=height_heuristic(min_cost, params.climb_penalty),
+            )
+        if self.algoritmo_busqueda == "dijkstra":
+            return dijkstra(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+            )
+        if self.algoritmo_busqueda == "greedy":
+            return greedy_best_first(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+                heuristic=lambda c, g: distance(c, g) * min_cost,
+            )
+        if self.algoritmo_busqueda == "bfs":
+            return breadth_first(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+            )
+        raise ValueError(
+            f"unknown search algorithm {self.algoritmo_busqueda!r}"
+        )
+
+    def _reachable_known(self, start: Coord) -> set:
+        """Discovered cells reachable from ``start`` over known ground."""
+        from collections import deque
+
+        params = self.mapa.params
+        offsets = movement_offsets(
+            params.move_radius, params.move_allow_diagonal
+        )
+        nodes = self.known_positions()
+        seen = {start}
+        queue = deque([start])
+        while queue:
+            current = queue.popleft()
+            for dx, dy, dz in offsets:
+                dest = (current[0] + dx, current[1] + dy, current[2] + dz)
+                dest_id = cell_id(*dest)
+                if (
+                    dest in nodes
+                    and dest not in seen
+                    and dest_id not in self.known_blocked
+                    and dest_id not in self.known_no_cell
+                ):
+                    seen.add(dest)
+                    queue.append(dest)
+        return seen
 
     def planned_leg_cost(self, start: Coord, goal: Coord) -> Optional[float]:
         params = self.mapa.params
@@ -355,51 +481,170 @@ class Rover:
     # -- movement ---------------------------------------------------------------
 
     def move_to(self, goal: Coord) -> Tuple[bool, List[Coord], float]:
-        """Walk to ``goal`` with online replanning, step by step.
+        """Walk to ``goal`` over discovered ground only.
 
-        After every step the rover surveys its new position and replans
-        from there, so a terrain cost revealed mid-route can change the
-        rest of the route. An unsurveyed cell is planned through
-        optimistically; if the rover then tries to step into it and it
-        turns out to be blocked, it does not move and spends no battery,
-        it only learns that the cell is blocked and replans around it.
+        At the start the rover literally knows only POI and station
+        positions; every other cell, including whether a hill exists
+        at a coordinate, is learned only by surveying from where it
+        stands, with a radius set by the visibility of the terrain
+        underfoot. Each loop surveys, then:
+
+        1. If a route over discovered ground reaches the goal, take
+           its first step.
+        2. Otherwise, move over discovered ground towards the
+           reachable discovered cell closest to the goal that still
+           has an unsurveyed neighbour (the frontier), and survey
+           from there.
+        3. If the rover itself is that frontier cell, take a blind
+           step to the unsurveyed neighbour closest to the goal:
+           if no cell exists there, it learns that (no move, no
+           battery); if it is blocked, it learns that; otherwise it
+           moves, pays the true cost, and surveys from the new cell.
+
         Returns ``(reached, steps_taken, battery_spent)``. It returns
-        ``reached=False`` (without raising) when there is no planned
-        route, or when the battery cannot pay for the next step: the
-        planner treats that POI as skipped and moves on.
+        ``reached=False`` (without raising) when no frontier remains,
+        or when the battery cannot pay for the next planned step: the
+        planner treats that POI as skipped and moves on. The battery
+        check before a step uses the planned cost (known, or UNKNOWN
+        for an unsurveyed goal/blind step), never the true cost of a
+        cell the rover has not surveyed yet; the true cost is only
+        deducted after the step. Exploration never spends the battery
+        needed to return over discovered ground to a station: each
+        loop, the reserve is the cheapest known route to a station,
+        and exploration stops when the battery reaches that reserve
+        plus a safety margin of 8.0 (hand-tuned: it covers one step
+        at maximum cost, 3.8, plus the return distance growing by
+        one step, also at most 3.8). A station detour is different:
+        it never explores at all. If no route over discovered ground
+        reaches that station, it fails immediately, so a failed
+        detour to an unreachable relay costs no battery and the
+        fallback to another station can still run.
         """
         taken: List[Coord] = []
         spent = 0.0
-        max_steps = len(self.mapa.cells) * 4 + 100
-        attempts = 0
-        while self.pos != goal:
-            self.survey()
-            result = self.planned_route(goal)
-            if result is None or len(result.path) < 2:
-                return False, taken, spent
-            self.expanded_total += result.expanded
-            nxt = result.path[1]
-            nxt_cell = self.mapa.cells.get(cell_id(*nxt))
-            if nxt_cell is not None and nxt_cell.blocked:
-                self.known_blocked.add(cell_id(*nxt))
-                attempts += 1
-                if attempts > max_steps:
-                    return False, taken, spent
-                continue
-            cost = self.actual_step_cost(self.pos, nxt)
-            if cost > self.battery:
-                return False, taken, spent
+        params = self.mapa.params
+        offsets = movement_offsets(
+            params.move_radius, params.move_allow_diagonal
+        )
+        cost_fn = build_planned_cost(
+            self.known, self.registry, params.climb_penalty
+        )
+        max_iter = len(self.mapa.cells) * 6 + 200
+
+        def try_step(nxt: Coord):
+            """Attempt one step. Returns 'moved', 'blocked' or 'battery'.
+
+            'blocked' covers both a blocked cell and a coordinate with
+            no cell at all; in both cases the rover learns, does not
+            move, and spends no battery.
+            """
+            nonlocal spent
+            nxt_id = cell_id(*nxt)
+            if nxt_id in self.known_blocked or nxt_id in self.known_no_cell:
+                return "blocked"
+            true_cell = self.mapa.cells.get(nxt_id)
+            if true_cell is None:
+                self.known_no_cell.add(nxt_id)
+                return "blocked"
+            if true_cell.blocked:
+                self.known_blocked.add(nxt_id)
+                return "blocked"
+            planned = cost_fn(self.pos, nxt)
+            if planned > self.battery:
+                return "battery"
+            true_cost = self.actual_step_cost(self.pos, nxt)
             self.pos = nxt
             self.path.append(nxt)
             taken.append(nxt)
             self.steps += 1
-            self.battery -= cost
-            self.bateria_gastada_total += cost
-            spent += cost
-            if len(taken) > max_steps:
+            self.battery = max(0.0, self.battery - true_cost)
+            self.bateria_gastada_total += true_cost
+            spent += true_cost
+            return "moved"
+
+        station_centers = [s.center for s in self.mapa.stations]
+        is_station_goal = goal in station_centers
+        for _ in range(max_iter):
+            self.survey()
+            if self.pos == goal:
+                return True, taken, spent
+            result = self._known_route(self.pos, goal)
+            if is_station_goal:
+                # Station detours never explore: either a route over
+                # discovered ground reaches the station, or the detour
+                # fails immediately and the fallback can try another
+                # station with the battery still intact.
+                if result is None or len(result.path) < 2:
+                    return False, taken, spent
+                self.expanded_total += result.expanded
+                status = try_step(result.path[1])
+                if status == "battery":
+                    return False, taken, spent
+                continue
+            # Battery reserve for the return, over discovered ground,
+            # plus a safety margin for one step's overshoot.
+            reserve = None
+            for station in station_centers:
+                route_back = self._known_route(self.pos, station)
+                if route_back is not None and (
+                    reserve is None or route_back.cost < reserve
+                ):
+                    reserve = route_back.cost
+            if reserve is not None and self.battery <= reserve + 8.0:
                 return False, taken, spent
-        self.survey()
-        return True, taken, spent
+            if result is not None and len(result.path) >= 2:
+                self.expanded_total += result.expanded
+                status = try_step(result.path[1])
+                if status == "battery":
+                    return False, taken, spent
+                continue
+            reachable = self._reachable_known(self.pos)
+            frontier = []
+            for cell_coord in reachable:
+                for dx, dy, dz in offsets:
+                    dest = (
+                        cell_coord[0] + dx,
+                        cell_coord[1] + dy,
+                        cell_coord[2] + dz,
+                    )
+                    dest_id = cell_id(*dest)
+                    if (
+                        dest_id not in self.known
+                        and dest_id not in self.known_blocked
+                        and dest_id not in self.known_no_cell
+                    ):
+                        frontier.append(cell_coord)
+                        break
+            if not frontier:
+                return False, taken, spent
+            frontier.sort(key=lambda c: distance(c, goal))
+            target = frontier[0]
+            if target != self.pos:
+                route_to_frontier = self._known_route(self.pos, target)
+                if route_to_frontier is None or len(route_to_frontier.path) < 2:
+                    return False, taken, spent
+                self.expanded_total += route_to_frontier.expanded
+                status = try_step(route_to_frontier.path[1])
+                if status == "battery":
+                    return False, taken, spent
+                continue
+            candidates = []
+            for dx, dy, dz in offsets:
+                dest = (self.pos[0] + dx, self.pos[1] + dy, self.pos[2] + dz)
+                dest_id = cell_id(*dest)
+                if (
+                    dest_id not in self.known
+                    and dest_id not in self.known_blocked
+                    and dest_id not in self.known_no_cell
+                ):
+                    candidates.append(dest)
+            if not candidates:
+                return False, taken, spent
+            candidates.sort(key=lambda d: distance(d, goal))
+            status = try_step(candidates[0])
+            if status == "battery":
+                return False, taken, spent
+        return False, taken, spent
 
     # -- high-level actions (preconditions + effects) ---------------------------
 
