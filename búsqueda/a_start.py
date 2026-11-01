@@ -1,37 +1,3 @@
-"""A* search, adapted to the Rover terrain.
-
-This module is deliberately generic: it knows nothing about maps, stations
-or points of interest. It works on coordinates and on three callables the
-caller supplies:
-
-* ``neighbours(coord)``: coordinates the rover may step to from ``coord``.
-* ``traversable(coord)``: whether that coordinate may be stood on.
-* ``step_cost(from_coord, to_coord)``: the cost of that step.
-
-The Rover (``rover.py``) supplies those callables from its known map: the
-neighbours come from ``movement_offsets`` (so ``move_radius`` and
-``allow_diagonal`` are honoured), blocked cells are excluded, and the step
-cost is the known terrain cost plus the climb penalty, except that a
-downhill step costs 0 (see ``rover.py``).
-
-Heuristic and admissibility
-----------------------------
-A step downhill costs 0, so a heuristic proportional to the distance to
-the goal can overestimate: a goal below the start could in principle be
-reached almost for free. That makes distance-based heuristics inadmissible
-here, and an inadmissible heuristic can return a path that is not the
-cheapest one. The heuristic provided here,
-:func:`height_heuristic`, is therefore based only on height: to reach a
-goal ``dz`` levels above the start, any path needs at least ``dz`` upward
-steps, and each upward step costs at least ``min_step_cost +
-climb_penalty``. When the goal is at or below the start, the heuristic is
-0, which is always admissible. It is weak, but it is honest: A* with this
-heuristic never returns a path more expensive than the cheapest one under
-the supplied step costs.
-
-Pass ``heuristic=None`` to run plain Dijkstra (heuristic 0 everywhere).
-"""
-
 from __future__ import annotations
 
 import heapq

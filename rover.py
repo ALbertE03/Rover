@@ -1,76 +1,3 @@
-"""Rover agent integrated with the generated terrain.
-
-Knowledge model (read this before changing anything)
-----------------------------------------------------
-The rover starts at the base station (the first station of the map, id
-``"base"``). From the start it knows only three things: the position of
-every point of interest, the position of every station (base and relays),
-and the shape of the map in the sense the generator itself documents:
-blocked cells are visible from anywhere ("obstacles are large"), while
-the terrain under the wheels is not. What the rover does *not* know is
-the terrain type of a cell, and therefore its travel cost, until it has
-surveyed that cell. "Unlocking" a cell in this module means revealing its
-terrain type, not unblocking it: a blocked cell stays blocked.
-
-Survey (visibility + height)
------------------------------
-Standing on a cell, the rover first learns that cell's own terrain, then
-reveals the cells around it within a survey radius that grows with height
-and shrinks with the visibility of the terrain it is standing on:
-
-    base_radius = move_radius + survey_height_bonus * z / (depth - 1)
-    survey_radius = base_radius * visibility(standing terrain)
-
-Plain (visibility 0.9) therefore reveals noticeably more than crevasse
-(0.35), and a high position reveals more than a low one. Unknown terrain
-costs ``UNKNOWN`` (2.2 in the default catalogue, the median) while it is
-being planned over.
-
-Battery
--------
-The battery is a real budget, not a label: the map only carries it. A step
-costs, in battery:
-
-* 0 if it goes downhill (``dz < 0``): descending never spends battery,
-  whatever the terrain;
-* the true terrain cost of the destination cell otherwise, plus
-  ``climb_penalty`` per level gained when ``dz > 0``.
-
-Note the difference between planned and actual cost. A* plans with the
-*known* cost (unknown cells at 2.2); the rover actually spends the *true*
-cost when it steps. A shortcut through unknown ground can therefore turn
-out cheaper (plain, 1.0) or more expensive (crevasse, 3.2) than planned.
-That gap is exactly the exploration/exploitation trade-off discussed in
-the agent notes, not a bug in the map.
-
-Stations recharge
------------------
-Stations are communication stations (radius 0: the rover must stand on
-the station cell to use it) and, in this agent, they also recharge the
-battery: the ``recargar`` action, only available at a station, restores
-the battery to full. Starting at base, the rover therefore starts with a
-full battery and can always refuel by returning to a station it can reach.
-
-Memory and the collect/analyse/transmit chain
---------------------------------------------
-Each collected point of interest occupies 1.0 unit of sample memory
-(``MapParams.memory`` is a budget in those units; the generator does not
-define the unit, so this module does). The chain is forced by
-preconditions, in this order: ``recolectar`` (at the POI cell, with free
-memory) -> ``analizar`` (turns raw samples into analysed samples) ->
-``transmitir`` (only at a station, frees the memory and turns analysed
-samples into delivered interest). The mission objective is the delivered
-interest: interest that was collected but never transmitted does not
-count, because the data never reached a station.
-
-This module does not import the planner or the metaheuristic at the top
-level (they both need a Rover, so importing them here would be circular).
-:func:`ejecutar_mision` imports them lazily and wires the three pieces
-together: metaheuristic proposes a POI order, planner turns it into
-high-level actions, A* (through :meth:`Rover.move_to`) resolves every
-displacement.
-"""
-
 from __future__ import annotations
 
 import sys
@@ -107,13 +34,19 @@ class PreconditionError(ValueError):
 
 
 def build_neighbours(
-    cells: Dict, offsets: Tuple[Coord, ...]
+    cells: Dict,
+    offsets: Tuple[Coord, ...],
+    known_blocked=None,
 ) -> Callable[[Coord], List[Coord]]:
     """Neighbour coordinates a rover may step to from a coordinate.
 
-    A destination must be a real cell of the map and must not be blocked.
-    Blocked status is global knowledge here (see the module docstring).
+    A destination must be a real cell of the map and must not be known
+    to be blocked. Blocked status is only known for cells the rover has
+    surveyed (or tried to step into); an unsurveyed cell is assumed
+    traversable until it is discovered otherwise, it is never assumed
+    blocked from the true map.
     """
+    blocked = known_blocked if known_blocked is not None else set()
 
     def neighbours(current: Coord) -> List[Coord]:
         x, y, z = current
@@ -121,7 +54,7 @@ def build_neighbours(
         for dx, dy, dz in offsets:
             dest = (x + dx, y + dy, z + dz)
             cell = cells.get(cell_id(*dest))
-            if cell is not None and cell.traversable:
+            if cell is not None and cell_id(*dest) not in blocked:
                 out.append(dest)
         return out
 
@@ -161,6 +94,7 @@ def plan_route(
     registry: Dict,
     climb_penalty: float,
     algoritmo: str = "a_star",
+    known_blocked=None,
 ) -> Optional[AStarResult]:
     """Planned route from ``start`` to ``goal`` with ``algoritmo``.
 
@@ -169,14 +103,17 @@ def plan_route(
     and step costs, so a comparison between them varies only the search
     itself, not the map or the cost model. A* and Dijkstra guarantee the
     cheapest planned route; greedy and BFS do not, which is the point
-    of comparing them.
+    of comparing them. Traversability follows the rover's knowledge:
+    only cells in ``known_blocked`` are excluded, unsurveyed cells are
+    assumed traversable.
     """
-    neighbours = build_neighbours(cells, offsets)
+    blocked = known_blocked if known_blocked is not None else set()
+    neighbours = build_neighbours(cells, offsets, blocked)
     min_cost = min(t.cost for t in registry.values() if t.name != UNKNOWN)
 
     def is_traversable(coord: Coord) -> bool:
         cell = cells.get(cell_id(*coord))
-        return cell is not None and cell.traversable
+        return cell is not None and cell_id(*coord) not in blocked
 
     cost_fn = build_planned_cost(known, registry, climb_penalty)
     if algoritmo == "a_star":
@@ -229,6 +166,8 @@ class Rover:
         battery: Remaining battery. Starts full.
         memory_used: Sample memory currently occupied.
         known: Cell id -> terrain name, for surveyed cells only.
+        known_blocked: Cell ids known to be blocked, from survey or
+            from a failed step attempt, never from the true map.
         delivered_interest: Interest already transmitted at a station.
         path: Every coordinate stepped on, in order, including the start.
         steps: Number of steps taken.
@@ -241,6 +180,7 @@ class Rover:
     battery: float = field(init=False)
     memory_used: float = field(init=False)
     known: Dict[str, str] = field(default_factory=dict, init=False)
+    known_blocked: set = field(default_factory=set, init=False)
     delivered_interest: float = field(default=0.0, init=False)
     path: List[Coord] = field(default_factory=list, init=False)
     steps: int = field(default=0, init=False)
@@ -333,12 +273,16 @@ class Rover:
         """Reveal the terrain around the current position.
 
         Returns the number of cells revealed for the first time.
+        Surveying a cell reveals both its terrain type and whether it
+        is blocked; nothing else reveals either of those two facts.
         """
         # The ground underfoot is always revealed first, so the radius
         # below is computed with a known visibility, never with UNKNOWN.
         own = self.mapa.cells.get(cell_id(*self.pos))
         if own is not None and cell_id(*self.pos) not in self.known:
             self.known[cell_id(*self.pos)] = own.true_terrain
+            if own.blocked:
+                self.known_blocked.add(cell_id(*self.pos))
             revealed = 1
         else:
             revealed = 0
@@ -357,6 +301,8 @@ class Rover:
             cell = self.mapa.cells.get(dest_id)
             if cell is not None:
                 self.known[dest_id] = cell.true_terrain
+                if cell.blocked:
+                    self.known_blocked.add(dest_id)
                 revealed += 1
         return revealed
 
@@ -388,6 +334,7 @@ class Rover:
             self.registry,
             params.climb_penalty,
             algoritmo=self.algoritmo_busqueda,
+            known_blocked=self.known_blocked,
         )
 
     def planned_leg_cost(self, start: Coord, goal: Coord) -> Optional[float]:
@@ -401,24 +348,30 @@ class Rover:
             self.registry,
             params.climb_penalty,
             algoritmo=self.algoritmo_busqueda,
+            known_blocked=self.known_blocked,
         )
         return result.cost if result is not None else None
 
     # -- movement ---------------------------------------------------------------
 
     def move_to(self, goal: Coord) -> Tuple[bool, List[Coord], float]:
-        """Walk to ``goal`` with online A* replanning, step by step.
+        """Walk to ``goal`` with online replanning, step by step.
 
         After every step the rover surveys its new position and replans
         from there, so a terrain cost revealed mid-route can change the
-        rest of the route. Returns ``(reached, steps_taken, battery_spent)``.
-        It returns ``reached=False`` (without raising) when there is no
-        planned route, or when the battery cannot pay for the next step:
-        the planner treats that POI as skipped and moves on.
+        rest of the route. An unsurveyed cell is planned through
+        optimistically; if the rover then tries to step into it and it
+        turns out to be blocked, it does not move and spends no battery,
+        it only learns that the cell is blocked and replans around it.
+        Returns ``(reached, steps_taken, battery_spent)``. It returns
+        ``reached=False`` (without raising) when there is no planned
+        route, or when the battery cannot pay for the next step: the
+        planner treats that POI as skipped and moves on.
         """
         taken: List[Coord] = []
         spent = 0.0
         max_steps = len(self.mapa.cells) * 4 + 100
+        attempts = 0
         while self.pos != goal:
             self.survey()
             result = self.planned_route(goal)
@@ -426,6 +379,13 @@ class Rover:
                 return False, taken, spent
             self.expanded_total += result.expanded
             nxt = result.path[1]
+            nxt_cell = self.mapa.cells.get(cell_id(*nxt))
+            if nxt_cell is not None and nxt_cell.blocked:
+                self.known_blocked.add(cell_id(*nxt))
+                attempts += 1
+                if attempts > max_steps:
+                    return False, taken, spent
+                continue
             cost = self.actual_step_cost(self.pos, nxt)
             if cost > self.battery:
                 return False, taken, spent
@@ -602,6 +562,8 @@ def ejecutar_mision(
     ).create()
     rover = Rover(mapa, algoritmo_busqueda=algoritmo_busqueda)
     conocidos_inicio = dict(rover.known)
+    bloqueados_inicio = set(rover.known_blocked)
+    cache_tramos: Dict = {}
     pois = list(mapa.pois.keys())
     orden_inicial = sorted(pois, key=lambda p: -mapa.pois[p].interest)
 
@@ -612,6 +574,8 @@ def ejecutar_mision(
             conocidos_inicio,
             rover.registry,
             algoritmo=algoritmo_busqueda,
+            known_blocked=bloqueados_inicio,
+            cache=cache_tramos,
         )[0]
 
     puntuacion_inicial = evaluar(orden_inicial)
@@ -680,6 +644,7 @@ def ejecutar_mision(
         "recargas": rover.recharges,
         "transmisiones": rover.transmits,
         "celdas_conocidas": len(rover.known),
+        "celdas_bloqueadas_conocidas": len(rover.known_blocked),
         "celdas_totales": len(mapa.cells),
     }
 

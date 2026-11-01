@@ -94,6 +94,13 @@ ocultas:
    ese POI como saltado: se omiten su `recolectar` y su `analizar`,
    pero el resto del plan sigue (incluidas las transmisiones en
    estación). Un fallo nunca aborta la misión entera.
+   **Excepción:** si el tramo fallido era un desvío a estación, la
+   ejecución no lo da por perdido: prueba las demás estaciones, de
+   menor coste planificado a mayor con el conocimiento descubierto
+   hasta ese momento, antes de dar por perdida la transmisión. Sin
+   este respaldo, una relay que parecía alcanzable por una ruta
+   optimista y resultó estar en otro componente haría perder todo el
+   lote en buffer.
 9. **Precondiciones antes de cada acción.** Cada acción comprueba sus
    precondiciones en ejecución (tabla siguiente) y, si no se cumplen,
    se reporta como fallo en la traza en vez de aplicarse en silencio.
@@ -113,12 +120,24 @@ transmitir/recargar solo en estación.
 
 ## Conocimiento y survey
 
-El modelo de conocimiento sigue lo que el propio generador documenta:
-las celdas bloqueadas se ven desde cualquier sitio ("los obstáculos son
-grandes"), pero el tipo de terreno bajo las ruedas no se conoce hasta
-observarlo. "Desbloquear" una celda significa aquí revelar su tipo de
-terreno (y su coste), no desbloquearla: una celda bloqueada sigue
-bloqueada.
+El rover no conoce el terreno: al empezar solo sabe dónde están los
+POIs y las estaciones. Todo lo demás lo descubre poco a poco, parado
+en una celda y observando a su alrededor (ver la fórmula abajo). En
+concreto, de cada celda solo se sabe su tipo de terreno y si está
+bloqueada después de haberla observado con el survey, o después de
+haber intentado pisarla y descubrir que está bloqueada. Antes de eso,
+planificar sobre ella cuesta `UNKNOWN` (2.2) y se asume transitable de
+forma optimista: nunca se asume bloqueada sin haberla visto. Si ese
+optimismo falla en ejecución, el rover no se mueve ni gasta batería,
+solo aprende que esa celda está bloqueada y replanifica rodeándola.
+"Desbloquear" una celda significa aquí revelar su tipo de terreno y su
+bloqueo, no desbloquearla: una celda bloqueada sigue bloqueada.
+
+Nota sobre estilo: los archivos del agente ya no llevan docstring de
+inicio, como los archivos de `enviro/` (que empiezan directamente con
+los imports). Los docstrings de funciones y clases siguen en inglés,
+que es el idioma del código del proyecto (los documentos, como este,
+van en español).
 
 Estando parado en una celda, el rover primero conoce el terreno que
 pisa y luego revela las celdas a su alrededor dentro de un radio que

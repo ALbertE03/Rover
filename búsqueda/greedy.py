@@ -1,18 +1,3 @@
-"""Greedy best-first search, as a distinct algorithm for comparison.
-
-Greedy expands the node that *looks* closest to the goal according to
-the heuristic, ignoring the cost already paid. It is fast and usually
-finds a route quickly, but the route is not guaranteed to be the
-cheapest one: a node that looks close can lead into expensive terrain,
-and greedy never reconsiders a node it has already expanded. That is
-exactly why it is worth comparing against A* and Dijkstra, which do
-guarantee the cheapest route under non-negative costs.
-
-The heuristic is supplied by the caller (the rover supplies a Euclidean
-distance estimate). Greedy does not need the heuristic to be admissible,
-because it makes no optimality claim.
-"""
-
 from __future__ import annotations
 
 import heapq

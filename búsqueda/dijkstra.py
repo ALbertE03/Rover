@@ -1,17 +1,3 @@
-"""Dijkstra search, as a distinct algorithm for comparison.
-
-Dijkstra is A* with a zero heuristic: it expands nodes in order of the
-cost already paid, with no estimate of the remaining cost. It is
-therefore optimal under the same conditions as A* (non-negative step
-costs), but it typically expands many more nodes, because it has no
-direction towards the goal. Implementing it as ``a_star`` with
-``heuristic=None`` is not a shortcut: that *is* Dijkstra, and keeping
-one implementation for both avoids two copies of the same search that
-could drift apart. The comparison in the experiment is still meaningful:
-same code path, different heuristic, different expanded-node count and
-running time for the same optimal path cost.
-"""
-
 from __future__ import annotations
 
 from typing import Optional

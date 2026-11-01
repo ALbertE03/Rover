@@ -1,27 +1,3 @@
-"""Statistics for the experimental protocol.
-
-The protocol this module enforces is simple to state and easy to
-violate by accident, so it is written here instead of left to each
-experiment script:
-
-* Several instances, of different sizes and difficulties.
-* Several runs per instance, with declared seeds, for every algorithm
-  with a random component. Deterministic algorithms run once per
-  instance, but their time is still reported.
-* A fixed compute budget, equal for every algorithm compared.
-* Mean *and* dispersion reported, never the best run alone.
-* Conclusions that do not exceed the numbers: if two algorithms cannot
-  be distinguished with the evidence obtained, that must be said.
-
-This module only uses the standard library. The 95% confidence interval
-is the normal approximation ``mean +/- 1.96 * standard_error``; for
-small samples (fewer than about 30 runs) a t-interval would be wider,
-so these intervals are, if anything, optimistic. That limitation is
-part of why ``necesita_mas_datos`` exists: it warns when the interval
-is wide relative to the mean, instead of letting a narrow-looking
-interval smuggle in a conclusion the data cannot support.
-"""
-
 from __future__ import annotations
 
 import math

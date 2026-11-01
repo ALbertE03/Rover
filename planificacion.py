@@ -1,51 +1,3 @@
-"""Symbolic planning (assignment section B, not C).
-
-Section B was chosen over section C (CSP) because the assignment allows
-exactly one of the two, and planning fits this agent directly: the
-planner decides the high-level sequence of actions, and A* resolves each
-concrete displacement. A CSP solver would have duplicated the same
-ordering, battery and memory reasoning in constraint form without adding
-a new capability for this first version. The constraints a CSP would
-have imposed are still enforced here, as action preconditions: battery
-capacity, memory capacity, precedence between actions, and communication
-only at a station. What is *not* modelled yet is a mission time limit
-and communication windows beyond "at a station" (stations have radius 0
-in the default config, so a window would first need a radius or a
-schedule in the map, which does not exist yet).
-
-Actions, preconditions and effects
-----------------------------------
-====================  =====================================================
-Action               Preconditions -> Effects
-====================  =====================================================
-``mover_a(dest)``    A planned A* route exists and the battery can pay
-                     for its next step (checked again step by step while
-                     moving) -> position changes, battery decreases
-                     (0 on downhill steps), terrain is surveyed on arrival.
-``recolectar(poi)``  At the POI cell, POI not yet collected, free memory
-                     -> POI enters the raw buffer, memory +1.
-``analizar``         At least one raw sample -> raw samples become
-                     analysed samples (memory unchanged).
-``transmitir``       At a station, at least one analysed sample ->
-                     analysed samples are delivered (their interest now
-                     counts), their memory is freed.
-``recargar``         At a station -> battery restored to full.
-====================  =====================================================
-
-Precedence is therefore: collect -> analyse -> transmit, and transmit /
-recharge only at a station. A plan that tried to transmit before
-analysing, or to collect with a full memory, would fail its preconditions
-at execution time instead of silently producing a wrong score.
-
-The planner itself is deliberately simple: it walks the POI order given
-by the metaheuristic, inserts a station detour (transmit + recharge)
-whenever memory is full or the battery cannot cover the next leg plus a
-reserve to the nearest station from the goal, and finishes with a final
-station detour to transmit and recharge. It does not search over action
-sequences from scratch; the search over orders lives in the
-metaheuristic, and the search over routes lives in A*.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -100,6 +52,7 @@ def _leg_cost(
     conocidos: Dict[str, str],
     registry: Dict,
     algoritmo: str = "a_star",
+    known_blocked=None,
 ) -> Optional[float]:
     params = mapa.params
     result: Optional[AStarResult] = plan_route(
@@ -111,6 +64,7 @@ def _leg_cost(
         registry,
         params.climb_penalty,
         algoritmo=algoritmo,
+        known_blocked=known_blocked,
     )
     return result.cost if result is not None else None
 
@@ -121,6 +75,8 @@ def evaluar_orden(
     conocidos: Dict[str, str],
     registry: Dict,
     algoritmo: str = "a_star",
+    known_blocked=None,
+    cache: Optional[Dict] = None,
 ) -> Tuple[float, Dict]:
     """Score an order of POI ids, for the metaheuristic.
 
@@ -136,6 +92,21 @@ def evaluar_orden(
     if not stations:
         return float("-inf"), {"interes": 0.0, "coste": 0.0, "alcanzados": 0}
 
+    # Leg costs are deterministic for a fixed knowledge snapshot, so
+    # caching them across evaluations of the same mission is exact and
+    # turns 300 order evaluations from thousands of A* searches into
+    # one search per distinct pair of stations/POIs.
+    if cache is None:
+        cache = {}
+
+    def _leg_cached(start: Coord, goal: Coord) -> Optional[float]:
+        clave = (start, goal)
+        if clave not in cache:
+            cache[clave] = _leg_cost(
+                start, goal, mapa, conocidos, registry, algoritmo, known_blocked
+            )
+        return cache[clave]
+
     def nearest_reachable(coord: Coord) -> Optional[Tuple[Coord, float]]:
         """Cheapest reachable station from ``coord``, or ``None``.
 
@@ -144,7 +115,7 @@ def evaluar_orden(
         """
         best: Optional[Tuple[Coord, float]] = None
         for station in stations:
-            cost = _leg_cost(coord, station, mapa, conocidos, registry, algoritmo)
+            cost = _leg_cached(coord, station)
             if cost is None:
                 continue
             if best is None or cost < best[1]:
@@ -159,7 +130,7 @@ def evaluar_orden(
     reached = 0
     for poi_id in orden:
         goal = parse_cell_id(mapa.pois[poi_id].cell_id)
-        leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
+        leg = _leg_cached(pos, goal)
         if leg is None:
             continue
         if memory + MEMORY_PER_POI > params.memory + 1e-9:
@@ -171,7 +142,7 @@ def evaluar_orden(
             pos = detour_coord
             battery = params.battery
             memory = 0.0
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
+            leg = _leg_cached(pos, goal)
             if leg is None:
                 continue
         reserve_station = nearest_reachable(goal)
@@ -188,7 +159,7 @@ def evaluar_orden(
             travel += detour
             pos = detour_coord
             battery = params.battery
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
+            leg = _leg_cached(pos, goal)
             if leg is None:
                 continue
         travel += leg
@@ -223,6 +194,7 @@ class Planificador:
         params = mapa.params
         registry = self.rover.registry
         conocidos = dict(self.rover.known)
+        conocidos_bloqueados = set(self.rover.known_blocked)
         algoritmo = self.rover.algoritmo_busqueda
         pos = self.rover.pos
         battery = self.rover.battery
@@ -237,7 +209,7 @@ class Planificador:
 
         def ir_a(dest: Coord) -> bool:
             nonlocal pos, battery
-            leg = _leg_cost(pos, dest, mapa, conocidos, registry, algoritmo)
+            leg = _leg_cost(pos, dest, mapa, conocidos, registry, algoritmo, conocidos_bloqueados)
             if leg is None:
                 return False
             acciones.append(Action("mover_a", dest))
@@ -256,7 +228,7 @@ class Planificador:
                 acciones.append(Action("recargar"))
                 memory = 0.0
                 battery = params.battery
-            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
+            leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo, conocidos_bloqueados)
             if leg is None:
                 omitidos.append(poi_id)
                 continue
@@ -264,7 +236,7 @@ class Planificador:
             if station_goal is None:
                 omitidos.append(poi_id)
                 continue
-            reserve = _leg_cost(goal, station_goal, mapa, conocidos, registry, algoritmo)
+            reserve = _leg_cost(goal, station_goal, mapa, conocidos, registry, algoritmo, conocidos_bloqueados)
             reserve = reserve if reserve is not None else 0.0
             if leg + reserve > battery:
                 station = estacion_cercana(pos)
@@ -273,7 +245,7 @@ class Planificador:
                     continue
                 acciones.append(Action("recargar"))
                 battery = params.battery
-                leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo)
+                leg = _leg_cost(pos, goal, mapa, conocidos, registry, algoritmo, conocidos_bloqueados)
                 if leg is None:
                     omitidos.append(poi_id)
                     continue
@@ -299,7 +271,14 @@ class Planificador:
         later actions (including a station ``transmitir``/``recargar``)
         still run. A failed ``transmitir`` (for example, because the
         buffer holds only raw samples) is reported and skipped, not
-        fatal.
+        fatal. One exception: a failed ``mover_a`` to a station is not
+        given up on immediately. The plan may have chosen that station
+        from optimistic knowledge (a route that looked open through
+        unsurveyed cells and turned out to be blocked); in that case
+        the execution tries the other stations, cheapest planned leg
+        first with the knowledge discovered so far, before reporting
+        the detour as failed. Without this fallback, one unreachable
+        relay would lose the whole buffered batch.
         """
         traza: List[str] = []
         saltar_poi: Optional[str] = None
@@ -317,7 +296,32 @@ class Planificador:
             except Exception as exc:  # PreconditionError and route failures
                 traza.append(f"FALLO {accion}: {exc}")
                 if accion.tipo == "mover_a":
-                    saltar_poi = "mover_a"
+                    estacion = rover.station_at(accion.objetivo)
+                    if estacion is not None:
+                        alternativas = []
+                        for otra in rover.mapa.stations:
+                            if otra.center == accion.objetivo:
+                                continue
+                            coste = rover.planned_leg_cost(
+                                rover.pos, otra.center
+                            )
+                            if coste is not None:
+                                alternativas.append((coste, otra))
+                        alternativas.sort(key=lambda t: t[0])
+                        for _coste, otra in alternativas:
+                            alcanzado, pasos, _gastado = rover.move_to(
+                                otra.center
+                            )
+                            if alcanzado:
+                                traza.append(
+                                    f"respaldo a estación {otra.id} "
+                                    f"{otra.center}: {len(pasos)} pasos"
+                                )
+                                break
+                        else:
+                            saltar_poi = "mover_a"
+                    else:
+                        saltar_poi = "mover_a"
                 # A failed transmit/recharge at the final station is not
                 # fatal either: the mission simply ends with samples
                 # still buffered, which the report makes visible.

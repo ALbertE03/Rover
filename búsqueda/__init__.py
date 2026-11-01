@@ -1,5 +1,3 @@
-"""Search algorithms for the Rover agent."""
-
 from .a_start import AStarResult, a_star, height_heuristic
 from .bfs import breadth_first
 from .dijkstra import dijkstra
