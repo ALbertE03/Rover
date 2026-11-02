@@ -76,7 +76,7 @@ import random
 import time
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 ESTRATOS = [
     (12, 12, 3),
@@ -393,21 +393,6 @@ def _legs_instancia(inst: Dict) -> List[Dict]:
                 )
     return filas
 
-
-def _resumen(valores: List[float]) -> Dict:
-    n = len(valores)
-    if n == 0:
-        return {"n": 0}
-    media = sum(valores) / n
-    desv = math.sqrt(sum((x - media) ** 2 for x in valores) / (n - 1)) if n > 1 else 0.0
-    se = desv / math.sqrt(n) if n else 0.0
-    return {
-        "n": n,
-        "media": round(media, 3),
-        "desv": round(desv, 3),
-        "ic95_inf": round(media - 1.96 * se, 3),
-        "ic95_sup": round(media + 1.96 * se, 3),
-    }
 
 
 def generar_graficas(res_busqueda, res_meta, directorio: str) -> None:

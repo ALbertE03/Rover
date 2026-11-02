@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 from .features import Poi, Station
-from .grid import Cell, distance
+from .grid import Cell
 
 @dataclass(frozen=True)
 class MapParams:

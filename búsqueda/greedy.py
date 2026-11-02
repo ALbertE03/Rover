@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from .a_start import (
     AStarResult,

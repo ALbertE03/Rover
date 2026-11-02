@@ -17,7 +17,6 @@ rover.py              # el rover: conocimiento, survey, batería, acciones
 metaheuristica.py     # random, hill climbing, SA, genético, tabú, ACO
 planificacion.py      # planificación simbólica (apartado B, no C)
 rover-domain.pddl     # dominio STRIPS del rover (C2b)
-estadistica.py        # media, dispersión, IC95, "¿hacen falta más datos?"
 experimento_representativo.py  # único experimento: 9 estratos, LHS, config completa, misiones + legs + gráficas
 AGENTE.md             # este documento
 ```
@@ -291,7 +290,7 @@ Limitación conocida: buscan órdenes, no subconjuntos. Un POI alcanzable
 se recoge aunque su interés sea 0, si la batería lo permite; descartar
 POIs por eficiencia es trabajo futuro, no un error de la versión actual.
 
-## Protocolo experimental (`estadistica.py`, `experimento_representativo.py`)
+## Protocolo experimental (`experimento_representativo.py`)
 
 - **Instancias variadas y representativas**: 9 estratos (12x12, 16x16,
   32x32 x z=3, 5, 7), asignación igual por estrato, muestreo por
@@ -311,11 +310,11 @@ POIs por eficiencia es trabajo futuro, no un error de la versión actual.
   primero, y el resumen general es sobre las medias por instancia (no
   se mezclan corridas de instancias distintas). Cada fila de la tabla
   lleva n, media, desviación, mediana, min/max e IC95.
-- **Cuántas corridas bastan**: no hay un número mágico. `estadistica`
-  avisa cuando el CV supera 0.20 o el ancho del IC95 relativo supera
-  0.40 (umbrales declarados, cambiables), y cuando dos IC95 se solapan
-  la conclusión es "no se distinguen con esta evidencia", no "son
-  iguales".
+- **Cuántas corridas bastan**: no hay un número mágico. Con una
+  desviación piloto y un margen deseado, el n necesario se calcula
+  con `calcular_n` en `experimento_representativo.py`, y cuando dos
+  IC95 se solapan la conclusión es "no se distinguen con esta
+  evidencia", no "son iguales".
 - **Conclusión que no excede los números**: en la versión rápida, el
   interés entregado no distingue a nadie, porque todos entregan los
   mismos POIs alcanzables. Lo que distingue a los buscadores es la

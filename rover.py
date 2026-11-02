@@ -265,10 +265,6 @@ class Rover:
     def base(self):
         return self.mapa.stations[0]
 
-    @property
-    def relays(self):
-        return self.mapa.stations[1:]
-
     def station_at(self, coord: Coord):
         for station in self.mapa.stations:
             if station.center == coord:
@@ -277,11 +273,6 @@ class Rover:
 
     def at_station(self) -> bool:
         return self.station_at(self.pos) is not None
-
-    def nearest_station(self, coord: Coord):
-        return min(
-            self.mapa.stations, key=lambda s: (distance(coord, s.center), s.id)
-        )
 
     def nearest_reachable_station(self, coord: Coord):
         """Nearest station by planned A* cost, not by straight-line distance.
@@ -379,27 +370,6 @@ class Rover:
             self.mapa.params.climb_penalty * dz
         )
 
-    def planned_route(self, goal: Coord) -> Optional[AStarResult]:
-        """Optimistic route estimate, for the planner only.
-
-        It plans over every cell except those known to be blocked, at
-        UNKNOWN cost for unsurveyed cells. The planner needs an
-        estimate to order POIs and to decide whether a POI is even
-        worth trying; the executor (``move_to``) never uses this
-        route, it only travels over discovered ground.
-        """
-        params = self.mapa.params
-        return plan_route(
-            self.pos,
-            goal,
-            self.mapa.cells,
-            movement_offsets(params.move_radius, params.move_allow_diagonal),
-            self.known,
-            self.registry,
-            params.climb_penalty,
-            algoritmo=self.algoritmo_busqueda,
-            known_blocked=self.known_blocked,
-        )
 
     def known_positions(self) -> set:
         """Coordinates the rover knows exist.
