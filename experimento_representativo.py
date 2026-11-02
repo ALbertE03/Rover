@@ -338,9 +338,26 @@ def _legs_instancia(inst: Dict) -> List[Dict]:
     from enviro.terrain.grid import movement_offsets
     from rover import Rover, plan_route
 
-    mapa = MapGenerator(
-        InstanceParams.from_config(seed=inst["semilla_mapa"], config=inst["config"])
-    ).create()
+    try:
+        mapa = MapGenerator(
+            InstanceParams.from_config(seed=inst["semilla_mapa"], config=inst["config"])
+        ).create()
+    except Exception as exc:  # noqa: BLE001 - una instancia no generable no debe matar los legs
+        # Una fila con "poi" para que el reagrupado de gráficas la ignore
+        # (las filas con "poi" son legs, no misiones) y el fallo quede
+        # registrado en el JSONL en vez de abortar toda la corrida.
+        return [
+            {
+                "instancia": inst["id"],
+                "estrato": inst["estrato"],
+                "ancho": inst["ancho"],
+                "profundidad": inst["profundidad"],
+                "n_pois": inst["n_pois"],
+                "poi": None,
+                "ok": False,
+                "error": repr(exc),
+            }
+        ]
     rover = Rover(mapa, algoritmo_busqueda="a_star")
     conocidos = dict(rover.known)
     bloqueados = set(rover.known_blocked)
