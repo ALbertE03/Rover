@@ -14,9 +14,9 @@ python rover.py 42
 El enlace para clonar es https://github.com/ALbertE03/Rover.git
 (si prefieres descargarlo sin git, en GitHub: Code → Download ZIP).
 
-## Cómo correr el proyecto (agente rover, rama `rover-agente`)
+## Cómo correr el proyecto (agente rover)
 
-Todo se corre desde esta carpeta (`src/`), con Python ≥ 3.12, solo
+Todo se corre desde la raíz del repo clonado, con Python ≥ 3.12, solo
 biblioteca estándar (sin dependencias). No hay que instalar nada.
 
 ```bash
