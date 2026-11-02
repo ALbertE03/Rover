@@ -59,14 +59,10 @@
   "network": {
     "stations": [
       {
-        "id": "base",
-        "radius": 0.0,
-        "signal": 1.0
+        "id": "base"
       },
       {
-        "id": "relay",
-        "radius": 0.0,
-        "signal": 0.8
+        "id": "relay"
       }
     ]
   },

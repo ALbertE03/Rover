@@ -205,8 +205,8 @@ def config_completa(
         },
         "network": {
             "stations": [
-                {"id": "base", "radius": 0.0, "signal": 1.0},
-                {"id": "relay", "radius": 0.0, "signal": 0.8},
+                {"id": "base"},
+                {"id": "relay"},
             ]
         },
         "poi": {

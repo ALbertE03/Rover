@@ -100,7 +100,7 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 | `generation` | Ruido (`noise_scale`, `noise_octaves`, `axis_weights`), `mixture_weight_range` (rango de los pesos de cada ruido), `depth_slope`, `terrain_relief_weight` (correlación altura–terreno), `relief_amplitude` (amplitud del relieve: número fijo, rango `[lo, hi]` o lista de opciones), `bands`, `biome_count`, `lava_pools`, `lava_pool_radius` |
 | `map` | `width`, `height`, `depth`, `block_rate`, límites `min/max_axis` |
 | `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
-| `network` | `stations`: lista de `(id, radius, signal)` |
+| `network` | `stations`: lista de ids (una estación es una celda: hay que pararse en ella para transmitir o recargar) |
 | `poi` | `count`, `min_visibility`, pesos de interés |
 | `rover` | `battery`, `memory` (declarados; el generador no los gasta) |
 | `terrain` | Catálogo: `cost`, `visibility`, `glyph` por tipo |

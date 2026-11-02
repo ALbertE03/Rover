@@ -198,8 +198,7 @@ class MapGenerator:
             while len(presets) < self.params.station_count:
                 presets.append(presets[-1])
         stations = tuple(
-            (str(s["id"]), float(s["radius"]), float(s["signal"]))
-            for s in presets[: self.params.station_count]
+            str(s["id"]) for s in presets[: self.params.station_count]
         )
         return MapParams(
             width=self.params.width,
@@ -317,7 +316,7 @@ class MapGenerator:
                 )
                 centers.append(farthest.pos)
 
-        return place_stations(presets, tuple(centers), self.map_params.diagonal)
+        return place_stations(presets, tuple(centers))
 
     def _place_pois(
         self, cells: Dict[str, Cell], stations: Tuple[Station, ...]

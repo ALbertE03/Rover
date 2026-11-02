@@ -4,23 +4,13 @@ from .grid import Coord
 
 @dataclass(frozen=True)
 class Station:
-    """A ground station and the area it covers.
+    """A ground station: a single cell.
 
-    Coverage is a sphere, which is what makes depth matter to the network: a
-    station that blankets the surface leaves the lower layers uncovered, and
-    the gap is a property of the terrain rather than an accident.
-
-    Attributes:
-        id: Station name.
-        center: Antenna position.
-        radius: Nominal range in grid units. 0 means a point station: the
-            rover must stand on its cell to link.
-        signal: Link quality in (0, 1].
+    A station has no range and no signal quality: the rover must stand
+    exactly on its cell to link, transmit or recharge.
     """
     id: str
     center: Coord
-    radius: float
-    signal: float
 
 @dataclass(frozen=True)
 class Poi:
@@ -47,25 +37,8 @@ class Poi:
     interest: float = 0.0
 
 def place_stations(
-    presets: Tuple[Tuple[str, float, float], ...],
+    presets: Tuple[str, ...],
     centers: Tuple[Coord, ...],
-    max_radius: float,
 ) -> Tuple[Station, ...]:
-    """Build stations from presets, capping each range to the world size.
-
-    A radius wider than the map is not a stronger network, it is a number that
-    has stopped meaning anything: every cell is covered either way, so coverage
-    can no longer tell two topologies apart.
-
-    Args:
-        presets: ``(id, radius, signal)`` per station, in placement order.
-        centers: Antenna positions, one per preset.
-        max_radius: Largest distance between two cells in this map.
-
-    Returns:
-        One station per preset.
-    """
-    return tuple(
-        Station(name, center, min(radius, max_radius), signal)
-        for (name, radius, signal), center in zip(presets, centers)
-    )
+    """Build stations from ids and centers, one station per preset."""
+    return tuple(Station(name, center) for name, center in zip(presets, centers))

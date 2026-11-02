@@ -31,7 +31,7 @@ class MapParams:
         move_allow_diagonal: When false, steps are limited to the 4 horizontal
             neighbours (each may still gain/lose one level, so hills stay
             climbable); plan-view diagonals are excluded.
-        stations: ``(id, radius, signal)`` per station.
+        stations: Station ids, in placement order.
         battery: Declared energy budget. Carried, not spent here.
         memory: Declared sample-buffer budget. Carried, not spent here.
         seed: Seed the instance came from.
@@ -44,7 +44,7 @@ class MapParams:
     climb_penalty: float
     poi_count: int
     poi_min_visibility: float
-    stations: Tuple[Tuple[str, float, float], ...]
+    stations: Tuple[str, ...]
     battery: float
     memory: float
     survey_height_bonus: float = 2.0
@@ -82,24 +82,11 @@ class MapParams:
             )
         if not self.stations:
             raise ValueError("at least one station is required")
-        for name, radius, signal in self.stations:
-            if radius < 0:
-                raise ValueError(f"station '{name}': radius must be >= 0, got {radius}")
-            # radius 0 = point station: the rover must stand on its cell.
-            if not 0.0 < signal <= 1.0:
-                raise ValueError(f"station '{name}': signal must be in (0, 1], got {signal}")
         if self.battery <= 0:
             raise ValueError(f"battery must be > 0, got {self.battery}")
         if self.memory <= 0:
             raise ValueError(f"memory must be > 0, got {self.memory}")
 
-    @property
-    def diagonal(self) -> float:
-        """Largest distance between two cells of this map."""
-        return distance(
-            (0, 0, 0),
-            (self.width - 1, self.height - 1, self.depth - 1),
-        )
 
 class Map:
     """A generated terrain instance.
