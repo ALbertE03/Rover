@@ -81,9 +81,20 @@ def _componentes(celdas, offsets):
 
 
 def estadisticas_instancia(inst: Dict) -> Dict:
-    mapa = MapGenerator(
-        InstanceParams.from_config(seed=inst["semilla_mapa"], config=inst["config"])
-    ).create()
+    try:
+        mapa = MapGenerator(
+            InstanceParams.from_config(seed=inst["semilla_mapa"], config=inst["config"])
+        ).create()
+    except Exception as exc:  # instancia no generable: se registra, no se aborta
+        return {
+            "instancia": inst["id"],
+            "estrato": inst["estrato"],
+            "ancho": inst["ancho"],
+            "profundidad": inst["profundidad"],
+            "n_pois_config": inst["n_pois"],
+            "semilla_mapa": inst["semilla_mapa"],
+            "error": str(exc),
+        }
     params = mapa.params
     celdas = mapa.cells
     # Superficie: celda más alta por columna (x, y).
@@ -150,6 +161,14 @@ def estadisticas_instancia(inst: Dict) -> Dict:
 
 
 def _resumen(filas: List[Dict]) -> Dict:
+    ok = [f for f in filas if "error" not in f]
+    fallos = [f for f in filas if "error" in f]
+    if fallos:
+        print(f"AVISO: {len(fallos)} instancias no generables (ver campo error):")
+        for f in fallos:
+            print(f"  instancia {f['instancia']} estrato {f['estrato']} semilla {f['semilla_mapa']}: {f['error']}")
+    filas = ok
+
     def media(campo):
         vals = [f[campo] for f in filas]
         return round(sum(vals) / len(vals), 3) if vals else 0.0
@@ -157,7 +176,10 @@ def _resumen(filas: List[Dict]) -> Dict:
     n = len(filas)
     total_pois = sum(f["n_pois"] for f in filas)
     return {
-        "n_instancias": n,
+        "n_instancias": len(ok) + len(fallos),
+        "n_instancias_ok": len(ok),
+        "n_instancias_fallo": len(fallos),
+        "fallos_por_estrato": dict(Counter(f["estrato"] for f in fallos)),
         "celdas_totales_media": media("celdas_totales"),
         "celdas_interiores_media": media("celdas_interiores"),
         "superficie_bloqueada_media": media("superficie_bloqueada"),
