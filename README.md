@@ -68,6 +68,20 @@ python experimento_representativo.py --prueba
 # python experimento_representativo.py --n-por-estrato 30
 # experimento completo: 270 instancias, 3240 misiones + legs.
 # NO correrlo sin tiempo de cómputo suficiente.
+
+# Estadísticas del terreno, aparte y sin misiones:
+# usa las mismas instancias, semillas y configs del experimento
+# (generar_instancias), pero solo genera el terreno y lo mide:
+# celdas, superficie, terrenos, alturas, estaciones, POIs,
+# POIs en estación o bloqueados, componentes conexas y POIs
+# alcanzables desde cualquier estación, desde la base, o
+# inalcanzables. Ojo: "bloqueada" incluye el interior sólido
+# de las lomas; la superficie transitable va aparte.
+python estadisticas_terreno.py --prueba
+# prueba: 2 instancias, las mismas de --prueba del experimento.
+python estadisticas_terreno.py --n-por-estrato 30
+# completo: 270 instancias, salidas stats_terreno.jsonl (una fila
+# por instancia) y resumen_terreno.json (agregado).
 ```
 
 Los resultados del experimento pequeño y del completo son archivos
