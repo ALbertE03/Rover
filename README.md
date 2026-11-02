@@ -39,8 +39,7 @@ en el código:
 - Metaheurísticas: `random`, `hill_climbing`,
   `simulated_annealing`, `genetico`, `tabu`, `aco`.
 - Planificación (C2b, apartado B): `planificacion.py`, dominio
-  STRIPS en `rover-domain.pddl`, heurísticas h_max/h_add en
-  `planificacion_heuristica.py`.
+  STRIPS en `rover-domain.pddl`.
 
 ```bash
 # Experimento (único script: experimento_representativo.py).

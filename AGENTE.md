@@ -16,7 +16,6 @@ búsqueda/beam.py      # beam search, ancho 20
 rover.py              # el rover: conocimiento, survey, batería, acciones
 metaheuristica.py     # random, hill climbing, SA, genético, tabú, ACO
 planificacion.py      # planificación simbólica (apartado B, no C)
-planificacion_heuristica.py  # h_max y h_add sobre hechos STRIPS
 rover-domain.pddl     # dominio STRIPS del rover (C2b)
 estadistica.py        # media, dispersión, IC95, "¿hacen falta más datos?"
 experimento_representativo.py  # único experimento: 9 estratos, LHS, config completa, misiones + legs + gráficas
@@ -360,11 +359,7 @@ estáticos (zona-com ?x), (conectado ?x ?y). Dominio en
 `rover-domain.pddl`. La batería y la memoria no son hechos STRIPS:
 se tratan como recursos fuera del dominio (C2b, sección 6, opción 2:
 el planificador decide la secuencia y la capa de recursos inserta
-recargas y transmisiones por memoria llena). Heurísticas de
-planificación: `planificacion_heuristica.py` calcula h_max (admisible)
-y h_add (informativa, no admisible) sobre la relajación que ignora
-borrados, para la cadena recolectar→analizar→transmitir.
-Supuestos clásicos que el modelo viola (C2b, sección 7): observabilidad
+recargas y transmisiones por memoria llena). Supuestos clásicos que el modelo viola (C2b, sección 7): observabilidad
 total (el rover solo conoce POIs y estaciones), mundo estático y
 determinista (el terreno se descubre al observar), y acciones
 instantáneas. El remedio de la conferencia que se aplica es
