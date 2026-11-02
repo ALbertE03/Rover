@@ -3,6 +3,17 @@
 Generador determinista de terrenos 3D sintéticos para simular un rover explorador.
 La misma semilla produce siempre el mismo mapa.
 
+## Clonar el repo
+
+```bash
+git clone https://github.com/ALbertE03/Rover.git
+cd Rover
+python rover.py 42
+```
+
+El enlace para clonar es https://github.com/ALbertE03/Rover.git
+(si prefieres descargarlo sin git, en GitHub: Code → Download ZIP).
+
 ## Cómo correr el proyecto (agente rover, rama `rover-agente`)
 
 Todo se corre desde esta carpeta (`src/`), con Python ≥ 3.12, solo
