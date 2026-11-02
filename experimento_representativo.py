@@ -215,7 +215,7 @@ def config_completa(
             "interest_climb_weight": round(climb_w, 3),
             "interest_ground_weight": round(1.0 - climb_w, 3),
         },
-        "rover": {"battery": float(bateria), "memory": float(memoria)},
+        "rover": {"battery": float(bateria), "memory": float(memoria), "reserve_margin": 8.0},
         "terrain": {
             "plain": {"cost": round(costes[0], 3), "visibility": round(vis[0], 3), "glyph": "."},
             "sand": {"cost": round(costes[1], 3), "visibility": round(vis[1], 3), "glyph": ":"},

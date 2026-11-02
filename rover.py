@@ -558,9 +558,10 @@ class Rover:
         needed to return over discovered ground to a station: each
         loop, the reserve is the cheapest known route to a station,
         and exploration stops when the battery reaches that reserve
-        plus a safety margin of 8.0 (hand-tuned: it covers one step
-        at maximum cost, 3.8, plus the return distance growing by
-        one step, also at most 3.8). A station detour is different:
+        plus the configured safety margin (``reserve_margin`` in the
+        rover config, 8.0 by default: it covers one step at maximum
+        cost, 3.8, plus the return distance growing by one step,
+        also at most 3.8). A station detour is different:
         it never explores at all. If no route over discovered ground
         reaches that station, it fails immediately, so a failed
         detour to an unreachable relay costs no battery and the
@@ -628,7 +629,7 @@ class Rover:
                     return False, taken, spent
                 continue
             # Battery reserve for the return, over discovered ground,
-            # plus a safety margin for one step's overshoot.
+            # plus the configured safety margin.
             # Reserve is the cheapest known return (A*), for every
             # search algorithm: a non-optimal search must not abort
             # a mission by overestimating the return cost.
@@ -641,7 +642,7 @@ class Rover:
                     reserve is None or route_back.cost < reserve
                 ):
                     reserve = route_back.cost
-            if reserve is not None and self.battery <= reserve + 8.0:
+            if reserve is not None and self.battery <= reserve + self.mapa.params.reserve_margin:
                 return False, taken, spent
             if result is not None and len(result.path) >= 2:
                 self.expanded_total += result.expanded

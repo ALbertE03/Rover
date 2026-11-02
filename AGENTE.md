@@ -157,8 +157,9 @@ descubierto a esa estación, fallan de inmediato sin gastar batería,
 para que el respaldo a otra estación todavía pueda correr. Y la
 exploración a un POI nunca gasta la batería de regreso: se detiene
 cuando la batería llega a la ruta conocida más barata a una estación
-más un margen de seguridad de 8.0 (ajustado a mano: un paso a coste
-máximo, 3.8, más el regreso que puede crecer otro paso, 3.8).
+más el margen de seguridad configurado en `rover.reserve_margin`
+(8.0 por defecto: un paso a coste máximo, 3.8, más el regreso que
+puede crecer otro paso, 3.8).
 
 Nota sobre estilo: los archivos del agente ya no llevan docstring de
 inicio, como los archivos de `enviro/` (que empiezan directamente con

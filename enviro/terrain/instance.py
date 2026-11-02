@@ -34,6 +34,10 @@ class MapParams:
         stations: Station ids, in placement order.
         battery: Declared energy budget. Carried, not spent here.
         memory: Declared sample-buffer budget. Carried, not spent here.
+        reserve_margin: Safety margin added to the cheapest known return
+            route before exploration stops. Default 8.0: one step at
+            maximum cost (3.8) plus the return growing by one step
+            (also at most 3.8), rounded up.
         seed: Seed the instance came from.
     """
     width: int
@@ -47,6 +51,7 @@ class MapParams:
     stations: Tuple[str, ...]
     battery: float
     memory: float
+    reserve_margin: float = 8.0
     survey_height_bonus: float = 2.0
     poi_interest_climb_weight: float = 0.6
     poi_interest_ground_weight: float = 0.4
@@ -86,6 +91,8 @@ class MapParams:
             raise ValueError(f"battery must be > 0, got {self.battery}")
         if self.memory <= 0:
             raise ValueError(f"memory must be > 0, got {self.memory}")
+        if self.reserve_margin < 0:
+            raise ValueError(f"reserve_margin must be >= 0, got {self.reserve_margin}")
 
 
 class Map:

@@ -74,7 +74,8 @@
   },
   "rover": {
     "battery": 100.0,
-    "memory": 2.0
+    "memory": 2.0,
+    "reserve_margin": 8.0
   },
   "terrain": {
     "crevasse": {
