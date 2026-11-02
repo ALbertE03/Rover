@@ -63,14 +63,19 @@ python experimento_grande.py \
 # gráficas con matplotlib dentro del mismo archivo.
 python experimento.py            # rápido: 3 instancias, 2 corridas
 python experimento.py --completo # 6 instancias, 5 corridas
-# Gráficas: se guardan en ./figuras (o --graficos <dir>), 7 PNG:
+# Gráficas: se guardan en ./figuras (o --graficos <dir>), 11 PNG:
 # batería, interés y nodos por buscador; interés y batería por
 # metaheurística; batería por instancia y buscador; interés por
-# instancia y metaheurística. El código de gráficas está en
-# experimento.py (generar_graficas) y no falla si falta un
-# algoritmo, una métrica o si solo hay 1 instancia: omite la
-# figura sin datos y sigue con las demás. Resultados en JSONL
-# con --resultados-jsonl <archivo>.
+# instancia y metaheurística; más 4 agrupadas por nº de POIs
+# (batería e interés por buscador y por metaheurística).
+# El código de gráficas está en experimento.py (generar_graficas)
+# y no falla si falta un algoritmo, una métrica o si solo hay 1
+# instancia: omite la figura sin datos y sigue con las demás.
+# Resultados en JSONL con --resultados-jsonl <archivo>.
+# Con más o menos POIs:
+python experimento.py --poi-counts 3,5,7 --graficos figuras_pois
+# cada instancia base se repite con 3, 5 y 7 POIs, y las gráficas
+# agrupadas muestran cómo escala cada algoritmo al añadir POIs.
 ```
 
 Los resultados del experimento pequeño y del completo son archivos

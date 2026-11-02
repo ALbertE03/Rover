@@ -976,6 +976,7 @@ def ejecutar_mision(
         "pois_omitidos_en_plan": plan.pois_omitidos,
         "acciones": [str(a) for a in plan.acciones],
         "traza": traza,
+        "n_pois": len(mapa.pois),
         "pois_entregados": rover.delivered_pois,
         "pois_recolectados": rover.collected_pois,
         "interes_recolectado": round(

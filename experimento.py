@@ -233,6 +233,66 @@ def generar_graficas(res_busqueda, res_meta, directorio):
         plt.close(fig)
         print(f"[gráficas] {nombre_archivo}")
 
+    def _barras_agrupadas_por_pois(titulo, resultados, metrica, ylabel, nombre_archivo):
+        """Grouped bars: x = algorithm, groups = number of POIs.
+
+        ``resultados`` is {algoritmo: {instancia: [informes]}} and
+        each informe may carry ``n_pois`` (added by ejecutar_mision).
+        Instances without ``n_pois`` are grouped under ``n=?`` and
+        still plotted, so old JSONL files without that field do not
+        crash the figure. When there is only one POI count in the
+        whole run, the figure is a single group per algorithm and
+        is still useful; when there are several, the groups show
+        how the metric scales when POIs are added or removed.
+        Values are means over per-instance means, exactly as in
+        _media_por_instancia, never pooled runs.
+        """
+        # Collect POI counts present, in numeric order.
+        counts = set()
+        for por_instancia in resultados.values():
+            for informes in por_instancia.values():
+                for inf in informes:
+                    counts.add(inf.get("n_pois", None))
+        if not resultados:
+            print(f"[gráficas] sin datos para {nombre_archivo}, se omite")
+            return
+        # Sort with None (unknown) last.
+        counts_ord = sorted([c for c in counts if c is not None]) + (
+            [None] if None in counts else []
+        )
+        nombres = sorted(resultados)
+        fig, ax = plt.subplots(figsize=(9, 4))
+        import numpy as np
+
+        x = np.arange(len(nombres))
+        ancho = 0.8 / max(1, len(counts_ord))
+        for k, cnt in enumerate(counts_ord):
+            medias = []
+            for algoritmo in nombres:
+                medias_inst = []
+                for informes in resultados[algoritmo].values():
+                    valores = [
+                        inf[metrica] for inf in informes
+                        if metrica in inf and inf[metrica] is not None
+                        and inf.get("n_pois", None) == cnt
+                    ]
+                    if valores:
+                        medias_inst.append(sum(valores) / len(valores))
+                medias.append(
+                    sum(medias_inst) / len(medias_inst) if medias_inst else 0.0
+                )
+            etiqueta = f"{cnt} POIs" if cnt is not None else "n=? POIs"
+            ax.bar(x + (k - (len(counts_ord) - 1) / 2) * ancho, medias, ancho, label=etiqueta)
+        ax.set_xticks(x)
+        ax.set_xticklabels(nombres, rotation=20, ha="right")
+        ax.set_ylabel(ylabel)
+        ax.set_title(titulo)
+        ax.legend()
+        fig.tight_layout()
+        fig.savefig(os.path.join(directorio, nombre_archivo), dpi=200)
+        plt.close(fig)
+        print(f"[gráficas] {nombre_archivo}")
+
     def _lineas_por_instancia(titulo, resultados, metrica, ylabel, nombre_archivo):
         # One line per algorithm, x = instance names in a stable order.
         # Missing (algoritmo, instancia) pairs are skipped, not
@@ -296,7 +356,36 @@ def generar_graficas(res_busqueda, res_meta, directorio):
             "Batería total",
             "fig_bateria_por_instancia.png",
         )
+    if res_busqueda is not None:
+        _barras_agrupadas_por_pois(
+            "Batería por buscador, agrupada por nº de POIs",
+            res_busqueda,
+            "bateria_gastada_total",
+            "Batería total media",
+            "fig_bateria_busqueda_por_pois.png",
+        )
+        _barras_agrupadas_por_pois(
+            "Interés entregado por buscador, agrupado por nº de POIs",
+            res_busqueda,
+            "interes_entregado",
+            "Interés entregado medio",
+            "fig_interes_busqueda_por_pois.png",
+        )
     if res_meta is not None:
+        _barras_agrupadas_por_pois(
+            "Interés entregado por metaheurística, agrupado por nº de POIs",
+            res_meta,
+            "interes_entregado",
+            "Interés entregado medio",
+            "fig_interes_meta_por_pois.png",
+        )
+        _barras_agrupadas_por_pois(
+            "Batería por metaheurística, agrupada por nº de POIs",
+            res_meta,
+            "bateria_gastada_total",
+            "Batería total media",
+            "fig_bateria_meta_por_pois.png",
+        )
         _barras(
             "Interés entregado por metaheurística",
             _media_por_instancia(res_meta, "interes_entregado"),
@@ -340,6 +429,16 @@ def _main(argv: List[str]) -> int:
         default=None,
         help="si se da, guarda una fila JSON por misión en este archivo",
     )
+    parser.add_argument(
+        "--poi-counts",
+        default=None,
+        help="nº de POIs por instancia, separados por coma, p. ej. 3,5,7. "
+        "Si se da, cada instancia base se repite una vez por cada "
+        "valor, con config override poi.count, y las gráficas "
+        "agrupadas por nº de POIs muestran cómo escala cada "
+        "algoritmo al añadir o quitar POIs. Si no se da, se usa "
+        "el nº de POIs del config (5 por defecto).",
+    )
     args = parser.parse_args(argv)
     if args.completo:
         instancias = INSTANCIAS_COMPLETAS
@@ -355,6 +454,27 @@ def _main(argv: List[str]) -> int:
             "100. Es una prueba del mecanismo, no evidencia para concluir: "
             "el propio informe avisará si los intervalos son anchos."
         )
+    if args.poi_counts:
+        try:
+            counts = [int(x) for x in args.poi_counts.split(",") if x.strip()]
+        except ValueError:
+            parser.error("--poi-counts debe ser una lista de enteros, p. ej. 3,5,7")
+        if not counts or any(c < 1 for c in counts):
+            parser.error("--poi-counts debe contener solo enteros >= 1")
+        instancias_expandidas = []
+        for inst in instancias:
+            for cnt in counts:
+                cfg = dict(inst.config) if inst.config else {}
+                cfg = {**cfg, "poi": {"count": cnt}}
+                instancias_expandidas.append(
+                    Instancia(
+                        f"{inst.nombre}-poi{cnt}",
+                        inst.semilla_mapa,
+                        cfg,
+                        f"{inst.descripcion}, {cnt} POIs",
+                    )
+                )
+        instancias = instancias_expandidas
     print(
         f"Instancias: {[i.nombre for i in instancias]} "
         f"(semillas de mapa declaradas en INSTANCIAS_*)."
