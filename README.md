@@ -32,50 +32,32 @@ en el código:
   `planificacion_heuristica.py`.
 
 ```bash
-# Experimento pequeño (el que se corre por defecto para el informe):
-# 5 instancias aleatorias válidas por cada tamaño x profundidad
-# (12x12, 16x16, 32x32 x z=3, 5, 7 = 45 instancias),
-# 540 misiones + 1575 legs. Tarda unos 6-8 minutos con 4 trabajadores.
-python experimento_pequeno.py \
-  --salida resultados_pequeno.jsonl \
-  --instancias instancias_pequeno.json
-
-# Análisis y gráficos del experimento pequeño
-python analizar_grande.py \
-  --entrada resultados_pequeno.jsonl \
-  --salida figuras_pequeno
-
-# Barrido de parámetros (subir y bajar batería, memoria, bloqueos,
-# penalización de subida, bonus de survey y nº de POIs, sobre 10
-# instancias 12x12 z=3 del experimento pequeño)
-python barrido.py instancias_pequeno.json barrido.jsonl
-
-# Experimento completo (CANCELADO, queda como referencia):
-# 30 instancias por combo = 270 instancias, 3240 misiones + legs.
-# Es el mismo diseño que el pequeño, solo que más grande; se canceló
-# por tiempo y se dejó guardado como completo, no se borró.
-python experimento_grande.py \
-  --salida resultados_grande.jsonl \
-  --instancias instancias_grande.json
-
-# Experimento viejo (config por defecto, pocas instancias):
-# también usa solo algoritmos de las conferencias, y genera
-# gráficas con matplotlib dentro del mismo archivo.
-python experimento.py            # rápido: 3 instancias, 2 corridas
-python experimento.py --completo # 6 instancias, 5 corridas
-# Gráficas: se guardan en ./figuras (o --graficos <dir>), 11 PNG:
-# batería, interés y nodos por buscador; interés y batería por
-# metaheurística; batería por instancia y buscador; interés por
-# instancia y metaheurística; más 4 agrupadas por nº de POIs
-# (batería e interés por buscador y por metaheurística).
-# El código de gráficas está en experimento.py (generar_graficas)
-# y no falla si falta un algoritmo, una métrica o si solo hay 1
-# instancia: omite la figura sin datos y sigue con las demás.
-# Resultados en JSONL con --resultados-jsonl <archivo>.
-# Con más o menos POIs:
-python experimento.py --poi-counts 3,5,7 --graficos figuras_pois
-# cada instancia base se repite con 3, 5 y 7 POIs, y las gráficas
-# agrupadas muestran cómo escala cada algoritmo al añadir POIs.
+# Experimento (único script: experimento_representativo.py).
+# Los experimentos viejo, grande y pequeño, y los scripts
+# analizar_grande.py, legs.py y barrido.py, se borraron: todo lo
+# que hacían está dentro de este script, en un solo diseño.
+# Diseño: 9 estratos (12x12, 16x16, 32x32 x z=3, 5, 7), asignación
+# igual por estrato, muestreo por hipercubo latino (LHS) para los
+# parámetros continuos y factores discretos equilibrados (POIs 3/5/7,
+# radio 1.0/1.8/2.5, diagonal sí/no, batería, memoria, bloqueos,
+# penalización de subida, bonus de survey, terrenos, bandas...).
+# Cada instancia lleva una configuración COMPLETA, nada queda por
+# defecto. Diseño pareado: la misma instancia corre con todos los
+# algoritmos, presupuesto igual (100 evaluaciones de órdenes).
+# Tamaño: con sigma piloto 27 y media 65, un margen del 20% al 95%
+# pide n=17 por estrato; el default 30 por estrato es conservador.
+# Gráficas: 11 PNG en --graficos (batería, interés y nodos por
+# buscador; interés y batería por metaheurística; por instancia;
+# más 4 agrupadas por nº de POIs). No falla si falta un algoritmo
+# o una métrica: omite la figura sin datos y sigue.
+python experimento_representativo.py --piloto
+# solo diseña y calcula n necesario, no corre misiones.
+python experimento_representativo.py --prueba
+# prueba pequeña: 2 instancias, todos los algoritmos, gráficas.
+# NO es el experimento completo.
+# python experimento_representativo.py --n-por-estrato 30
+# experimento completo: 270 instancias, 3240 misiones + legs.
+# NO correrlo sin tiempo de cómputo suficiente.
 ```
 
 Los resultados del experimento pequeño y del completo son archivos

@@ -18,15 +18,15 @@ metaheuristica.py     # random, hill climbing, SA, genético, tabú, ACO
 planificacion.py      # planificación simbólica (apartado B, no C)
 planificacion_heuristica.py  # h_max y h_add sobre hechos STRIPS
 rover-domain.pddl     # dominio STRIPS del rover (C2b)
-experimento_grande.py # 30 instancias aleatorias por tamaño x profundidad
 estadistica.py        # media, dispersión, IC95, "¿hacen falta más datos?"
-experimento.py        # comparación con protocolo experimental
+experimento_representativo.py  # único experimento: 9 estratos, LHS, config completa, misiones + legs + gráficas
 AGENTE.md             # este documento
 ```
 
 Se ejecuta con `python rover.py [semilla]` (por defecto, 42) para una
-misión, y con `python experimento.py` para la comparación (versión
-rápida) o `python experimento.py --completo` para la versión larga.
+misión, y con `python experimento_representativo.py --prueba` para la
+prueba pequeña (2 instancias) o `--n-por-estrato 30` para el
+experimento completo (270 instancias; no correr sin tiempo).
 
 ## Apartado elegido: B (planificación), no C (CSP)
 
@@ -292,12 +292,14 @@ Limitación conocida: buscan órdenes, no subconjuntos. Un POI alcanzable
 se recoge aunque su interés sea 0, si la batería lo permite; descartar
 POIs por eficiencia es trabajo futuro, no un error de la versión actual.
 
-## Protocolo experimental (`estadistica.py`, `experimento.py`)
+## Protocolo experimental (`estadistica.py`, `experimento_representativo.py`)
 
-- **Instancias variadas**: 12x12 por defecto (semillas 42, 0, 3), 16x16,
-  bloqueos altos con más lava, y la semilla 7 de relieve bajo. Una
-  instancia es un par (semilla de mapa, config), con nombre que dice
-  qué varía.
+- **Instancias variadas y representativas**: 9 estratos (12x12, 16x16,
+  32x32 x z=3, 5, 7), asignación igual por estrato, muestreo por
+  hipercubo latino para parámetros continuos y factores discretos
+  equilibrados, cada instancia con configuración completa (nada por
+  defecto). Una instancia es un par (semilla de mapa, config), con
+  estrato y nº de POIs que dicen qué varía.
 - **Corridas declaradas**: los buscadores son deterministas, una
   corrida por instancia (con su tiempo igualmente reportado). Las
   metaheurísticas corren varias veces por instancia con semillas
