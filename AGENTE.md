@@ -10,9 +10,15 @@ búsqueda/a_start.py   # A*
 búsqueda/dijkstra.py  # Dijkstra (A* con heurística 0)
 búsqueda/greedy.py    # greedy best-first (solo heurística)
 búsqueda/bfs.py       # BFS (menos pasos, sin mirar el coste)
+búsqueda/dfs.py       # DFS (solo en rutas, no en misiones: ver abajo)
+búsqueda/weighted.py  # A* ponderado, f = g + 2h
+búsqueda/beam.py      # beam search, ancho 20
 rover.py              # el rover: conocimiento, survey, batería, acciones
-metaheuristica.py     # SA, algoritmo genético y búsqueda tabú
+metaheuristica.py     # random, hill climbing, SA, genético, tabú, ACO
 planificacion.py      # planificación simbólica (apartado B, no C)
+planificacion_heuristica.py  # h_max y h_add sobre hechos STRIPS
+rover-domain.pddl     # dominio STRIPS del rover (C2b)
+experimento_grande.py # 30 instancias aleatorias por tamaño x profundidad
 estadistica.py        # media, dispersión, IC95, "¿hacen falta más datos?"
 experimento.py        # comparación con protocolo experimental
 AGENTE.md             # este documento
@@ -200,9 +206,9 @@ por distancia en línea recta: una estación puede ser la más cercana y
 estar en un componente desconectado (la relay de la semilla 42, por
 ejemplo, es transitable pero inalcanzable desde la base).
 
-## Algoritmos de búsqueda: A*, Dijkstra, greedy, BFS
+## Algoritmos de búsqueda: A*, Dijkstra, greedy, BFS, DFS, ponderado, beam
 
-Los cuatro comparten vecinos, celdas transitables y costes de paso, así
+Todos comparten vecinos, celdas transitables y costes de paso, así
 que una comparación entre ellos varía solo la búsqueda, no el mapa ni
 el modelo de coste. El rover elige con `algoritmo_busqueda`:
 
@@ -215,17 +221,48 @@ el modelo de coste. El rover elige con `algoritmo_busqueda`:
   ruta no tiene por qué ser la más barata.
 - **BFS**: menos pasos, sin mirar el coste. Su ruta puede ser la más
   cara en batería aunque tenga los mismos pasos que las demás.
+- **A* ponderado** (`weighted`, w = 2.0): f = g + 2h. No es admisible
+  y pierde la optimalidad, pero suele ser más rápido; su coste está
+  acotado por 2 veces el óptimo cuando h es admisible.
+- **Beam** (`beam`, ancho 20): como A*, pero conserva solo los 20
+  mejores nodos de la frontera. Es incompleto (puede descartar la
+  única ruta) y no óptimo, a cambio de memoria acotada.
+- **DFS**: solo se compara en rutas (legs), no en misiones completas.
+  Motivo medido: `move_to` replanifica tras cada survey, y DFS no
+  tiene subestructura óptima, así que el primer paso de una ruta DFS
+  replanificada puede deshacer el avance anterior y el rover oscila
+  hasta agotar la batería (semilla 42 con config por defecto: 116
+  pasos, 0 POIs entregados, mientras A* entrega los 5). En una ruta
+  estática, sin replanificación, DFS sí es comparable: en el leg
+  base→poi_0 de la primera instancia aleatoria, DFS cuesta 61.8
+  frente a 14.9 de A*. La reserva de retorno en `move_to` se calcula
+  siempre con A* (el retorno más barato), para que una búsqueda no
+  óptima no aborte la misión por sobreestimar el retorno.
 
-## Metaheurísticas: SA, genético y tabú
+Algoritmos de C1 que **no** se implementan, con motivo: IDDFS es
+óptimo solo si todos los costes son iguales, y aquí no lo son;
+IDA* y SMA* son variantes acotadas en memoria de A*, innecesarias
+porque un mapa 32x32x7 cabe entero en memoria; la búsqueda
+bidireccional necesita un criterio de encuentro con costes
+asimétricos (bajar cuesta 0, subir cuesta) y un grafo conocido, que
+el rover no tiene bajo observabilidad parcial; DE y PSO son para
+espacios continuos (conferencia de metaheurísticas) y el orden de
+POIs es una permutación.
 
-Las tres buscan el orden de visita de los POIs, con la misma interfaz
+## Metaheurísticas: random, hill climbing, SA, genético, tabú, ACO
+
+Las seis buscan el orden de visita de los POIs, con la misma interfaz
 y el mismo presupuesto de evaluaciones (ver el protocolo abajo):
 
+- **Random search**: órdenes aleatorios, se queda con el mejor.
+  Es la línea base: cualquier metaheurística debe superarla para
+  justificar su complejidad.
+- **Hill climbing**: vecino por intercambio, solo se mueve si mejora
+  estrictamente. Es la línea base local: se queda en el primer
+  óptimo local que encuentra.
 - **Simulated annealing**: un orden, vecino por intercambio (a veces
   inversión de segmento), aceptación probabilística
-  `exp((nuevo - actual) / T)` con `T` enfriándose. Ahí vive la
-  probabilidad del objetivo: el interés de cada POI viene del mapa y
-  no es aleatorio, pero la *elección* del orden sí lo es.
+  `exp((nuevo - actual) / T)` con `T` enfriándose.
 - **Algoritmo genético**: población de 20 órdenes, selección por
   torneo, cruce de orden (un segmento de un padre y el resto en el
   orden del otro, para que el hijo siga siendo una permutación válida)
@@ -234,12 +271,22 @@ y el mismo presupuesto de evaluaciones (ver el protocolo abajo):
   de los últimos intercambios prohibidos durante 10 iteraciones (con
   aspiración: un movimiento tabú que mejora el mejor global sí se
   permite), para no deshacer el último paso y ciclar entre dos órdenes.
+- **ACO**: 10 hormigas construyen órdenes paso a paso, con
+  probabilidad proporcional a la feromona del arco POI→POI, que
+  evapora con rho = 0.3 y se refuerza en el mejor orden de cada
+  iteración. La feromona vive en arcos POI→POI, no en celdas.
 
-La puntuación que evalúan las tres es `interés * 100 - coste_de_viaje`:
+La puntuación que evalúan las seis es `interés * 100 - coste_de_viaje`:
 el interés domina y el coste solo desempata órdenes con el mismo
-interés. Las tres devuelven siempre el mejor orden visto, así que
+interés. Todas devuelven siempre el mejor orden visto, así que
 ninguna puede ser peor que el orden inicial (POIs por interés
-descendente).
+descendente). El interés de un POI es determinista dado el mapa
+(altura + coste de terreno), pero el mapa es aleatorio (config de
+terreno aleatoria + semilla), así que el interés recogido es una
+variable aleatoria sobre instancias: los puntos altos tienden a
+tener más interés por el término de altura, sin que sea una
+garantía, porque el término de terreno y la colocación de POIs
+también varían.
 
 Limitación conocida: buscan órdenes, no subconjuntos. Un POI alcanzable
 se recoge aunque su interés sea 0, si la batería lo permite; descartar
@@ -278,14 +325,49 @@ POIs por eficiencia es trabajo futuro, no un error de la versión actual.
   Esa es la conclusión honesta con 3 instancias: el orden por instancia
   se sostiene, la media general todavía no.
 
-## Objetivo
+## Objetivo y estados formales
 
-Maximizar el interés **entregado**: la suma del `interest` de los POIs
-recogidos, analizados y transmitidos en una estación. El interés
-recogido pero no transmitido no cuenta, porque esos datos nunca llegaron
-a una estación. "Recogido" significa aquí pisar la celda del POI; la
-variante "observarlo desde una celda vecina con visibilidad >= 0.7"
-queda como variante futura, no implementada.
+**Objetivo**: maximizar el interés **recolectado** (y, en el informe,
+también el entregado, para que ambas lecturas queden a la vista).
+"Recolectado" significa pisar la celda del POI; la misión completa
+sigue exigiendo analizar y transmitir en una estación para que el
+interés cuente como entregado, porque esos datos nunca llegaron a
+una estación si no se transmiten. `ejecutar_mision` devuelve ambas
+cantidades: `interes_recolectado` e `interes_entregado`. La variante
+"observarlo desde una celda vecina con visibilidad >= 0.7" queda
+como variante futura, no implementada.
+
+**Estado (C1)**: s = (pos, batería, memoria, conocido, bloqueados,
+sin-celda, estadio), donde pos es la celda actual, batería y memoria
+son los recursos restantes, conocido mapea celdas observadas a
+terreno, bloqueados/sin-celda son los obstáculos y no-celdas
+aprendidos, y estadio asigna a cada POI uno de {sin-visitar,
+recogido, analizado, entregado} (exactamente uno por POI, invariante
+mutex). Estado inicial s0: pos = base B, batería y memoria llenas,
+conocido = survey desde B, todos los POIs sin visitar. Acciones:
+mover_a, recolectar, analizar, transmitir, recargar, con sus
+precondiciones y efectos (ver `rover.py`). Coste de paso: 0 al bajar
+(dz < 0), coste de terreno + penalización de subida en otro caso.
+Test de objetivo: todo POI entregable está entregado; la misión
+termina honestamente sin entregar si ninguna estación es alcanzable.
+
+**Estado STRIPS (C2b)**: hechos (en ?x) con exactamente uno por
+estado, (muestra-en ?m ?x), (tiene ?m), (analizada ?m),
+(transmitida ?m) con exactamente un estadio por muestra, y hechos
+estáticos (zona-com ?x), (conectado ?x ?y). Dominio en
+`rover-domain.pddl`. La batería y la memoria no son hechos STRIPS:
+se tratan como recursos fuera del dominio (C2b, sección 6, opción 2:
+el planificador decide la secuencia y la capa de recursos inserta
+recargas y transmisiones por memoria llena). Heurísticas de
+planificación: `planificacion_heuristica.py` calcula h_max (admisible)
+y h_add (informativa, no admisible) sobre la relajación que ignora
+borrados, para la cadena recolectar→analizar→transmitir.
+Supuestos clásicos que el modelo viola (C2b, sección 7): observabilidad
+total (el rover solo conoce POIs y estaciones), mundo estático y
+determinista (el terreno se descubre al observar), y acciones
+instantáneas. El remedio de la conferencia que se aplica es
+**replanificación**: ejecutar, observar, replanificar desde el
+estado observado, que es exactamente lo que hace `move_to`.
 
 ## Resultados medidos
 

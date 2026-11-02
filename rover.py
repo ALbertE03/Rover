@@ -5,9 +5,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from búsqueda.a_start import AStarResult, a_star, height_heuristic
+from búsqueda.beam import beam_search
 from búsqueda.bfs import breadth_first
+from búsqueda.dfs import depth_first
 from búsqueda.dijkstra import dijkstra
 from búsqueda.greedy import greedy_best_first
+from búsqueda.weighted import weighted_a_star
 from enviro.terrain.catalogue import TERRAIN, UNKNOWN, terrain
 from enviro.terrain.grid import (
     Coord,
@@ -98,14 +101,16 @@ def plan_route(
 ) -> Optional[AStarResult]:
     """Planned route from ``start`` to ``goal`` with ``algoritmo``.
 
-    ``algoritmo`` is one of ``"a_star"``, ``"dijkstra"``, ``"greedy"``
-    or ``"bfs"``. All four share the same neighbours, traversable cells
-    and step costs, so a comparison between them varies only the search
-    itself, not the map or the cost model. A* and Dijkstra guarantee the
-    cheapest planned route; greedy and BFS do not, which is the point
-    of comparing them. Traversability follows the rover's knowledge:
-    only cells in ``known_blocked`` are excluded, unsurveyed cells are
-    assumed traversable.
+    ``algoritmo`` is one of ``"a_star"``, ``"dijkstra"``, ``"greedy"``,
+    ``"bfs"``, ``"dfs"``, ``"weighted"`` (weighted A*, w = 2.0) or
+    ``"beam"`` (beam search, width 20). All share the same neighbours,
+    traversable cells and step costs, so a comparison between them
+    varies only the search itself, not the map or the cost model.
+    A* and Dijkstra guarantee the cheapest planned route; greedy, BFS,
+    DFS, weighted A* and beam do not, which is the point of comparing
+    them. Traversability follows the rover's knowledge: only cells in
+    ``known_blocked`` are excluded, unsurveyed cells are assumed
+    traversable.
     """
     blocked = known_blocked if known_blocked is not None else set()
     neighbours = build_neighbours(cells, offsets, blocked)
@@ -150,15 +155,62 @@ def plan_route(
             traversable=is_traversable,
             step_cost=cost_fn,
         )
+    if algoritmo == "dfs":
+        return depth_first(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+        )
+    if algoritmo == "weighted":
+        return weighted_a_star(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+            heuristic=height_heuristic(min_cost, climb_penalty),
+            peso=2.0,
+        )
+    if algoritmo == "beam":
+        return beam_search(
+            start,
+            goal,
+            neighbours=neighbours,
+            traversable=is_traversable,
+            step_cost=cost_fn,
+            heuristic=height_heuristic(min_cost, climb_penalty),
+            ancho=20,
+        )
     raise ValueError(
         f"unknown search algorithm {algoritmo!r}; expected 'a_star', "
-        "'dijkstra', 'greedy' or 'bfs'"
+        "'dijkstra', 'greedy', 'bfs', 'dfs', 'weighted' or 'beam'"
     )
 
 
 @dataclass
 class Rover:
     """A rover moving on a generated map, under partial observability.
+
+    Formal state (conference C1, section 2): a state is
+    s = (pos, battery, memory, known, known_blocked, known_no_cell,
+    stage), where pos is the current cell, battery and memory are the
+    remaining resources, known maps surveyed cell ids to terrain,
+    known_blocked / known_no_cell are the learned obstacles and
+    non-cells, and stage maps each POI to one of {unvisited,
+    collected, analysed, delivered} (exactly one stage per POI, a
+    mutex invariant). The initial state s0 has pos = base station B,
+    battery and memory full, known = survey from B only, and every
+    POI unvisited; the rover knows POI and station positions only,
+    not terrain, blockage or heights. Actions are mover_a,
+    recolectar, analizar, transmitir, recargar (see execute_action);
+    RESULT(s, a) is their precondition/effect table, COST(s, a, s')
+    is the step cost (0 downhill, terrain cost + climb penalty
+    otherwise), and the goal test is: every POI that can be delivered
+    is delivered, with the objective maximising total delivered
+    interest (collected interest is reported separately). The
+    STRIPS version of this state is in rover-domain.pddl.
 
     Attributes:
         mapa: The generated map (terrain, stations, POIs).
@@ -365,7 +417,7 @@ class Rover:
         return positions
 
     def _known_route(
-        self, start: Coord, goal: Coord
+        self, start: Coord, goal: Coord, algoritmo: Optional[str] = None
     ) -> Optional[AStarResult]:
         """Route over discovered ground only, from ``start`` to ``goal``.
 
@@ -408,7 +460,8 @@ class Rover:
         min_cost = min(
             t.cost for t in self.registry.values() if t.name != UNKNOWN
         )
-        if self.algoritmo_busqueda == "a_star":
+        algoritmo = algoritmo if algoritmo is not None else self.algoritmo_busqueda
+        if algoritmo == "a_star":
             return a_star(
                 start,
                 goal,
@@ -417,24 +470,47 @@ class Rover:
                 step_cost=cost_fn,
                 heuristic=height_heuristic(min_cost, params.climb_penalty),
             )
-        if self.algoritmo_busqueda == "dijkstra":
+        if algoritmo == "dijkstra":
             return dijkstra(
                 start, goal, neighbours=neighbours,
                 traversable=traversable, step_cost=cost_fn,
             )
-        if self.algoritmo_busqueda == "greedy":
+        if algoritmo == "greedy":
             return greedy_best_first(
                 start, goal, neighbours=neighbours,
                 traversable=traversable, step_cost=cost_fn,
                 heuristic=lambda c, g: distance(c, g) * min_cost,
             )
-        if self.algoritmo_busqueda == "bfs":
+        if algoritmo == "bfs":
             return breadth_first(
                 start, goal, neighbours=neighbours,
                 traversable=traversable, step_cost=cost_fn,
             )
+        if algoritmo == "dfs":
+            return depth_first(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+            )
+        if algoritmo == "weighted":
+            return weighted_a_star(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+                heuristic=height_heuristic(
+                    min_cost, params.climb_penalty
+                ),
+                peso=2.0,
+            )
+        if algoritmo == "beam":
+            return beam_search(
+                start, goal, neighbours=neighbours,
+                traversable=traversable, step_cost=cost_fn,
+                heuristic=height_heuristic(
+                    min_cost, params.climb_penalty
+                ),
+                ancho=20,
+            )
         raise ValueError(
-            f"unknown search algorithm {self.algoritmo_busqueda!r}"
+            f"unknown search algorithm {algoritmo!r}"
         )
 
     def _reachable_known(self, start: Coord) -> set:
@@ -583,9 +659,14 @@ class Rover:
                 continue
             # Battery reserve for the return, over discovered ground,
             # plus a safety margin for one step's overshoot.
+            # Reserve is the cheapest known return (A*), for every
+            # search algorithm: a non-optimal search must not abort
+            # a mission by overestimating the return cost.
             reserve = None
             for station in station_centers:
-                route_back = self._known_route(self.pos, station)
+                route_back = self._known_route(
+                    self.pos, station, algoritmo="a_star"
+                )
                 if route_back is not None and (
                     reserve is None or route_back.cost < reserve
                 ):
@@ -795,6 +876,9 @@ def ejecutar_mision(
     from metaheuristica import (
         AlgoritmoGenetico,
         BusquedaTabu,
+        ColoniaHormigas,
+        HillClimbing,
+        RandomSearch,
         SimulatedAnnealing,
     )
     from planificacion import Planificador, evaluar_orden
@@ -849,10 +933,26 @@ def ejecutar_mision(
             evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
         )
         mejor_orden, mejor_puntuacion, _h = tabu.optimizar(orden_inicial)
+    elif metaheuristica == "random":
+        rs = RandomSearch(
+            evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = rs.optimizar(orden_inicial)
+    elif metaheuristica == "hill_climbing":
+        hc = HillClimbing(
+            evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = hc.optimizar(orden_inicial)
+    elif metaheuristica == "aco":
+        aco = ColoniaHormigas(
+            evaluar, presupuesto=presupuesto_evaluaciones, semilla=semilla_meta
+        )
+        mejor_orden, mejor_puntuacion, _h = aco.optimizar(orden_inicial)
     else:
         raise ValueError(
             f"unknown metaheuristic {metaheuristica!r}; expected "
-            "'simulated_annealing', 'genetico', 'tabu' or 'ninguna'"
+            "'simulated_annealing', 'genetico', 'tabu', 'random', "
+            "'hill_climbing', 'aco' or 'ninguna'"
         )
     planificador = Planificador(rover)
     plan = planificador.planificar(mejor_orden)
@@ -877,6 +977,10 @@ def ejecutar_mision(
         "acciones": [str(a) for a in plan.acciones],
         "traza": traza,
         "pois_entregados": rover.delivered_pois,
+        "pois_recolectados": rover.collected_pois,
+        "interes_recolectado": round(
+            sum(rover.poi_interest(p) for p in rover.collected_pois), 3
+        ),
         "interes_entregado": round(rover.delivered_interest, 3),
         "interes_total_mapa": round(
             sum(p.interest for p in mapa.pois.values()), 3

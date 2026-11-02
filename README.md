@@ -3,6 +3,82 @@
 Generador determinista de terrenos 3D sintéticos para simular un rover explorador.
 La misma semilla produce siempre el mismo mapa.
 
+## Cómo correr el proyecto (agente rover, rama `rover-agente`)
+
+Todo se corre desde esta carpeta (`src/`), con Python ≥ 3.12, solo
+biblioteca estándar (sin dependencias). No hay que instalar nada.
+
+```bash
+# Una misión (semilla 42 por defecto, SA + A*)
+python rover.py 42
+
+# Una misión con otro buscador o metaheurística
+python rover.py 42   # el buscador y la meta se eligen en rover.py / ejecutar_mision
+```
+
+Algoritmos que existen, **solo de las conferencias** (C1, C2b y
+metaheurísticas). Cualquier otro algoritmo fue eliminado, no está
+en el código:
+
+- Búsqueda (C1): `a_star`, `dijkstra` (= coste uniforme), `greedy`,
+  `bfs`, `weighted` (A* ponderado, w = 2.0), `beam` (ancho 20).
+  `dfs` también es de C1, pero solo se compara en rutas (legs):
+  en misiones replanifica tras cada survey y oscila hasta agotar
+  la batería (ver `AGENTE.md`).
+- Metaheurísticas: `random`, `hill_climbing`,
+  `simulated_annealing`, `genetico`, `tabu`, `aco`.
+- Planificación (C2b, apartado B): `planificacion.py`, dominio
+  STRIPS en `rover-domain.pddl`, heurísticas h_max/h_add en
+  `planificacion_heuristica.py`.
+
+```bash
+# Experimento pequeño (el que se corre por defecto para el informe):
+# 5 instancias aleatorias válidas por cada tamaño x profundidad
+# (12x12, 16x16, 32x32 x z=3, 5, 7 = 45 instancias),
+# 540 misiones + 1575 legs. Tarda unos 6-8 minutos con 4 trabajadores.
+python experimento_pequeno.py \
+  --salida resultados_pequeno.jsonl \
+  --instancias instancias_pequeno.json
+
+# Análisis y gráficos del experimento pequeño
+python analizar_grande.py \
+  --entrada resultados_pequeno.jsonl \
+  --salida figuras_pequeno
+
+# Barrido de parámetros (subir y bajar batería, memoria, bloqueos,
+# penalización de subida, bonus de survey y nº de POIs, sobre 10
+# instancias 12x12 z=3 del experimento pequeño)
+python barrido.py instancias_pequeno.json barrido.jsonl
+
+# Experimento completo (CANCELADO, queda como referencia):
+# 30 instancias por combo = 270 instancias, 3240 misiones + legs.
+# Es el mismo diseño que el pequeño, solo que más grande; se canceló
+# por tiempo y se dejó guardado como completo, no se borró.
+python experimento_grande.py \
+  --salida resultados_grande.jsonl \
+  --instancias instancias_grande.json
+
+# Experimento viejo (config por defecto, pocas instancias):
+# también usa solo algoritmos de las conferencias, y genera
+# gráficas con matplotlib dentro del mismo archivo.
+python experimento.py            # rápido: 3 instancias, 2 corridas
+python experimento.py --completo # 6 instancias, 5 corridas
+# Gráficas: se guardan en ./figuras (o --graficos <dir>), 7 PNG:
+# batería, interés y nodos por buscador; interés y batería por
+# metaheurística; batería por instancia y buscador; interés por
+# instancia y metaheurística. El código de gráficas está en
+# experimento.py (generar_graficas) y no falla si falta un
+# algoritmo, una métrica o si solo hay 1 instancia: omite la
+# figura sin datos y sigue con las demás. Resultados en JSONL
+# con --resultados-jsonl <archivo>.
+```
+
+Los resultados del experimento pequeño y del completo son archivos
+JSONL (una fila por misión o por leg), con instancia, tamaño,
+profundidad, algoritmo, interés recolectado y entregado, batería,
+pasos, nodos y tiempo, para que cualquier tabla del informe se pueda
+recalcular desde el archivo, sin volver a correr nada.
+
 ```python
 from enviro.terrain import InstanceParams, MapGenerator
 

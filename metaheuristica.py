@@ -9,6 +9,75 @@ Evaluar = Callable[[List[str]], float]
 
 
 @dataclass
+class RandomSearch:
+    """Random search over POI visit orders, conference metaheuristics.
+
+    The simplest baseline in the conference: sample random orders,
+    keep the best ever seen. It uses no neighbourhood and no memory
+    beyond the best order, so any other metaheuristic must beat it
+    to be worth its complexity. It stops at ``presupuesto``
+    evaluations, like the other metaheuristics.
+    """
+
+    evaluar: Evaluar
+    presupuesto: int = 100
+    semilla: int = 7
+
+    def optimizar(
+        self, orden_inicial: List[str]
+    ) -> Tuple[List[str], float, List[float]]:
+        rng = random.Random(self.semilla)
+        mejor = list(orden_inicial)
+        mejor_puntuacion = self.evaluar(mejor)
+        historial = [mejor_puntuacion]
+        evaluaciones = 1
+        while evaluaciones < self.presupuesto and len(orden_inicial) >= 2:
+            candidato = list(orden_inicial)
+            rng.shuffle(candidato)
+            puntuacion = self.evaluar(candidato)
+            evaluaciones += 1
+            if puntuacion > mejor_puntuacion:
+                mejor, mejor_puntuacion = candidato, puntuacion
+            historial.append(mejor_puntuacion)
+        return mejor, mejor_puntuacion, historial
+
+
+@dataclass
+class HillClimbing:
+    """Hill climbing over POI visit orders, conference metaheuristics.
+
+    Start from the initial order, try swap neighbours, move only to a
+    strictly better neighbour, and stop at a local optimum or at
+    ``presupuesto`` evaluations. It is the local-search baseline:
+    fast and greedy, with no mechanism to escape a local optimum,
+    which is exactly what simulated annealing and tabu search add.
+    """
+
+    evaluar: Evaluar
+    presupuesto: int = 100
+    semilla: int = 7
+
+    def optimizar(
+        self, orden_inicial: List[str]
+    ) -> Tuple[List[str], float, List[float]]:
+        rng = random.Random(self.semilla)
+        actual = list(orden_inicial)
+        puntuacion_actual = self.evaluar(actual)
+        historial = [puntuacion_actual]
+        evaluaciones = 1
+        while evaluaciones < self.presupuesto and len(actual) >= 2:
+            i, j = rng.sample(range(len(actual)), 2)
+            vecino = list(actual)
+            vecino[i], vecino[j] = vecino[j], vecino[i]
+            puntuacion = self.evaluar(vecino)
+            evaluaciones += 1
+            if puntuacion > puntuacion_actual:
+                actual, puntuacion_actual = vecino, puntuacion
+            historial.append(puntuacion_actual)
+        return actual, puntuacion_actual, historial
+
+
+@dataclass
 class SimulatedAnnealing:
     """Simulated annealing over POI visit orders.
 
@@ -233,5 +302,90 @@ class BusquedaTabu:
             if puntuacion_actual > mejor_puntuacion:
                 mejor = list(actual)
                 mejor_puntuacion = puntuacion_actual
+            historial.append(mejor_puntuacion)
+        return mejor, mejor_puntuacion, historial
+
+
+@dataclass
+class ColoniaHormigas:
+    """Ant colony optimisation over POI visit orders, conference swarm.
+
+    Each ant builds an order step by step: from the last POI chosen,
+    the next POI is drawn with probability proportional to
+    (pheromone on the last->next edge) ** alfa, with no heuristic
+    term (beta = 0), because the only quality signal available before
+    execution is the order score itself. After each iteration,
+    pheromones evaporate by factor (1 - rho) and the best order of
+    the iteration deposits pheromone proportional to its score
+    (shifted to be positive). This is the conference ACO construction
+    rule adapted to permutations: pheromone lives on POI->POI edges,
+    not on cells, so a good pair of consecutive POIs is reused.
+    """
+
+    evaluar: Evaluar
+    presupuesto: int = 100
+    hormigas: int = 10
+    alfa: float = 1.0
+    rho: float = 0.3
+    semilla: int = 7
+
+    def optimizar(
+        self, orden_inicial: List[str]
+    ) -> Tuple[List[str], float, List[float]]:
+        rng = random.Random(self.semilla)
+        n = len(orden_inicial)
+        if n < 2:
+            puntuacion = self.evaluar(list(orden_inicial))
+            return list(orden_inicial), puntuacion, [puntuacion]
+        # Pheromone on directed edges (i -> j), indexed by POI position
+        # in orden_inicial (identity is by POI id, not position).
+        feromona: Dict[Tuple[str, str], float] = {}
+        for a in orden_inicial:
+            for b in orden_inicial:
+                if a != b:
+                    feromona[(a, b)] = 1.0
+        mejor = list(orden_inicial)
+        mejor_puntuacion = self.evaluar(mejor)
+        historial = [mejor_puntuacion]
+        evaluaciones = 1
+        while evaluaciones < self.presupuesto:
+            mejor_iter = None
+            mejor_iter_puntuacion = float("-inf")
+            for _ in range(self.hormigas):
+                if evaluaciones >= self.presupuesto:
+                    break
+                restante = list(orden_inicial)
+                actual_poi = rng.choice(restante)
+                orden = [actual_poi]
+                restante.remove(actual_poi)
+                while restante:
+                    pesos = [
+                        feromona.get((actual_poi, c), 1.0) ** self.alfa
+                        for c in restante
+                    ]
+                    total = sum(pesos)
+                    r = rng.random() * total
+                    elegido = restante[-1]
+                    for c, w in zip(restante, pesos):
+                        r -= w
+                        if r <= 0:
+                            elegido = c
+                            break
+                    orden.append(elegido)
+                    restante.remove(elegido)
+                    actual_poi = elegido
+                puntuacion = self.evaluar(orden)
+                evaluaciones += 1
+                if puntuacion > mejor_iter_puntuacion:
+                    mejor_iter, mejor_iter_puntuacion = orden, puntuacion
+                if puntuacion > mejor_puntuacion:
+                    mejor, mejor_puntuacion = list(orden), puntuacion
+            # Evaporation, then reinforcement by the best of the iteration.
+            for clave in feromona:
+                feromona[clave] *= 1.0 - self.rho
+            if mejor_iter is not None:
+                refuerzo = max(0.0, mejor_iter_puntuacion) + 1.0
+                for a, b in zip(mejor_iter, mejor_iter[1:]):
+                    feromona[(a, b)] = feromona.get((a, b), 0.0) + refuerzo
             historial.append(mejor_puntuacion)
         return mejor, mejor_puntuacion, historial

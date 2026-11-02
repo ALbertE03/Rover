@@ -9,8 +9,22 @@ from typing import Dict, List, Optional
 import estadistica
 from rover import ejecutar_mision
 
-ALGORITMOS_BUSQUEDA = ["a_star", "dijkstra", "greedy", "bfs"]
-METAHEURISTICAS = ["simulated_annealing", "genetico", "tabu"]
+# Solo algoritmos de las conferencias. Búsqueda (C1): A*, Dijkstra
+# (= coste uniforme), greedy, BFS, A* ponderado y beam. DFS es de C1
+# pero NO va en misiones: replanifica tras cada survey y oscila
+# (ver AGENTE.md); DFS solo se compara en legs, en legs.py.
+# Metaheurísticas (conferencia): random, hill climbing, SA, genético,
+# tabú y ACO. No hay DE, PSO ni GRASP: DE/PSO son para espacios
+# continuos y GRASP solo aparece nombrado, sin algoritmo detallado.
+ALGORITMOS_BUSQUEDA = ["a_star", "dijkstra", "greedy", "bfs", "weighted", "beam"]
+METAHEURISTICAS = [
+    "random",
+    "hill_climbing",
+    "simulated_annealing",
+    "genetico",
+    "tabu",
+    "aco",
+]
 
 
 @dataclass
@@ -138,6 +152,172 @@ def _informe_tabla(titulo: str, resultados: Dict, metrica: str) -> None:
             print(f"  {a} vs {b}: {'sí' if ok else 'NO'} ({motivo})")
 
 
+def _media_por_instancia(resultados, metrica):
+    """Mean over instance means for one metric, robust to missing data.
+
+    ``resultados`` is {algoritmo: {instancia: [informes]}}. Returns
+    {algoritmo: (media, desviacion, n_instancias)} where media is
+    over per-instance means (never pooled runs), desviacion is the
+    sample std over those means (0.0 when there is only one
+    instance), and n_instancias is how many instances actually had
+    that metric. Algorithms with no usable data are omitted, so a
+    figure never crashes on a missing algorithm or metric.
+    """
+    import math
+
+    out = {}
+    for algoritmo, por_instancia in resultados.items():
+        medias = []
+        for informes in por_instancia.values():
+            valores = [
+                inf[metrica] for inf in informes if metrica in inf and inf[metrica] is not None
+            ]
+            if valores:
+                medias.append(sum(valores) / len(valores))
+        if not medias:
+            continue
+        media = sum(medias) / len(medias)
+        if len(medias) > 1:
+            var = sum((x - media) ** 2 for x in medias) / (len(medias) - 1)
+            desv = math.sqrt(var)
+        else:
+            desv = 0.0
+        out[algoritmo] = (media, desv, len(medias))
+    return out
+
+
+def generar_graficas(res_busqueda, res_meta, directorio):
+    """Generate matplotlib figures from experiment results, in-place.
+
+    Called by _main after the tables. It never raises: if matplotlib
+    is missing, it prints how to install it and returns; if a figure
+    has no data, it is skipped with a warning; every figure is
+    closed after saving, so several runs in a row do not accumulate
+    open figures. Output: PNG files in ``directorio`` (created if
+    needed), with the same names on every run, so a new run
+    overwrites the old figures instead of duplicating them.
+    """
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print(
+            "\n[gráficas] matplotlib no está instalado; "
+            "instala con: pip install matplotlib"
+        )
+        return
+    import os
+
+    os.makedirs(directorio, exist_ok=True)
+
+    def _barras(titulo, datos, ylabel, nombre_archivo):
+        if not datos:
+            print(f"[gráficas] sin datos para {nombre_archivo}, se omite")
+            return
+        nombres = sorted(datos)
+        medias = [datos[n][0] for n in nombres]
+        errores = [datos[n][1] for n in nombres]
+        # Error bars need at least 2 instances; with 1 instance the
+        # std is 0.0 by construction, which matplotlib accepts.
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.bar(nombres, medias, yerr=errores, capsize=4)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{titulo} (n={datos[nombres[0]][2]} instancias)")
+        ax.tick_params(axis="x", rotation=20)
+        for etiqueta in ax.get_xticklabels():
+            etiqueta.set_ha("right")
+        fig.tight_layout()
+        fig.savefig(os.path.join(directorio, nombre_archivo), dpi=200)
+        plt.close(fig)
+        print(f"[gráficas] {nombre_archivo}")
+
+    def _lineas_por_instancia(titulo, resultados, metrica, ylabel, nombre_archivo):
+        # One line per algorithm, x = instance names in a stable order.
+        # Missing (algoritmo, instancia) pairs are skipped, not
+        # treated as zero, so a partial run still plots correctly.
+        instancias = []
+        for por_instancia in resultados.values():
+            for nombre in por_instancia:
+                if nombre not in instancias:
+                    instancias.append(nombre)
+        if not instancias or not resultados:
+            print(f"[gráficas] sin datos para {nombre_archivo}, se omite")
+            return
+        fig, ax = plt.subplots(figsize=(8, 4))
+        for algoritmo in sorted(resultados):
+            xs, ys = [], []
+            for nombre in instancias:
+                informes = resultados[algoritmo].get(nombre, [])
+                valores = [
+                    inf[metrica] for inf in informes
+                    if metrica in inf and inf[metrica] is not None
+                ]
+                if valores:
+                    xs.append(nombre)
+                    ys.append(sum(valores) / len(valores))
+            if xs:
+                ax.plot(xs, ys, marker="o", label=algoritmo)
+        ax.set_ylabel(ylabel)
+        ax.set_title(titulo)
+        ax.legend()
+        ax.tick_params(axis="x", rotation=20)
+        for etiqueta in ax.get_xticklabels():
+            etiqueta.set_ha("right")
+        fig.tight_layout()
+        fig.savefig(os.path.join(directorio, nombre_archivo), dpi=200)
+        plt.close(fig)
+        print(f"[gráficas] {nombre_archivo}")
+
+    if res_busqueda is not None:
+        _barras(
+            "Batería gastada total por buscador",
+            _media_por_instancia(res_busqueda, "bateria_gastada_total"),
+            "Batería total media",
+            "fig_bateria_busqueda.png",
+        )
+        _barras(
+            "Interés entregado por buscador",
+            _media_por_instancia(res_busqueda, "interes_entregado"),
+            "Interés entregado medio",
+            "fig_interes_busqueda.png",
+        )
+        _barras(
+            "Nodos expandidos por buscador",
+            _media_por_instancia(res_busqueda, "nodos_expandidos"),
+            "Nodos expandidos medios",
+            "fig_nodos_busqueda.png",
+        )
+        _lineas_por_instancia(
+            "Batería por instancia y buscador",
+            res_busqueda,
+            "bateria_gastada_total",
+            "Batería total",
+            "fig_bateria_por_instancia.png",
+        )
+    if res_meta is not None:
+        _barras(
+            "Interés entregado por metaheurística",
+            _media_por_instancia(res_meta, "interes_entregado"),
+            "Interés entregado medio",
+            "fig_interes_meta.png",
+        )
+        _barras(
+            "Batería gastada total por metaheurística",
+            _media_por_instancia(res_meta, "bateria_gastada_total"),
+            "Batería total media",
+            "fig_bateria_meta.png",
+        )
+        _lineas_por_instancia(
+            "Interés entregado por instancia y metaheurística",
+            res_meta,
+            "interes_entregado",
+            "Interés entregado",
+            "fig_interes_meta_por_instancia.png",
+        )
+
+
 def _main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser(description="Experimento del rover")
     parser.add_argument(
@@ -149,6 +329,16 @@ def _main(argv: List[str]) -> int:
         "--modo",
         choices=["busqueda", "metaheuristicas", "ambos"],
         default="ambos",
+    )
+    parser.add_argument(
+        "--graficos",
+        default="figuras",
+        help="directorio donde se guardan las gráficas PNG (se crea si no existe)",
+    )
+    parser.add_argument(
+        "--resultados-jsonl",
+        default=None,
+        help="si se da, guarda una fila JSON por misión en este archivo",
     )
     args = parser.parse_args(argv)
     if args.completo:
@@ -170,6 +360,8 @@ def _main(argv: List[str]) -> int:
         f"(semillas de mapa declaradas en INSTANCIAS_*)."
     )
     inicio = time.perf_counter()
+    res_busqueda = None
+    res_meta = None
     if args.modo in ("busqueda", "ambos"):
         res_busqueda = comparar_busqueda(instancias)
         _informe_tabla(
@@ -219,6 +411,26 @@ def _main(argv: List[str]) -> int:
             res_meta,
             "puntuacion_final",
         )
+    if args.resultados_jsonl:
+        import json
+
+        with open(args.resultados_jsonl, "w") as f:
+            for resultados in (res_busqueda, res_meta):
+                if not resultados:
+                    continue
+                for algoritmo, por_instancia in resultados.items():
+                    for nombre, informes in por_instancia.items():
+                        for inf in informes:
+                            fila = dict(inf)
+                            fila["algoritmo"] = algoritmo
+                            fila["instancia"] = nombre
+                            # Acciones y traza son texto largo; no van al JSONL.
+                            fila.pop("acciones", None)
+                            fila.pop("traza", None)
+                            f.write(json.dumps(fila, default=str) + "\n")
+        print(f"\nResultados guardados en {args.resultados_jsonl}")
+    print(f"\nGenerando gráficas en {args.graficos} ...")
+    generar_graficas(res_busqueda, res_meta, args.graficos)
     print(f"\nTiempo total del experimento: {time.perf_counter() - inicio:.1f} s")
     return 0
 
