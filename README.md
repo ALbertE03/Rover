@@ -3,6 +3,69 @@
 Generador determinista de terrenos 3D sintéticos para simular un rover explorador.
 La misma semilla produce siempre el mismo mapa.
 
+## Cómo correr el proyecto (agente rover, rama `rover-agente`)
+
+Todo se corre desde esta carpeta (`src/`), con Python ≥ 3.12, solo
+biblioteca estándar (sin dependencias). No hay que instalar nada.
+
+```bash
+# Una misión (semilla 42 por defecto, SA + A*)
+python rover.py 42
+
+# Una misión con otro buscador o metaheurística
+python rover.py 42   # el buscador y la meta se eligen en rover.py / ejecutar_mision
+```
+
+Algoritmos que existen, **solo de las conferencias** (C1, C2b y
+metaheurísticas). Cualquier otro algoritmo fue eliminado, no está
+en el código:
+
+- Búsqueda (C1): `a_star`, `dijkstra` (= coste uniforme), `greedy`,
+  `bfs`, `weighted` (A* ponderado, w = 2.0), `beam` (ancho 20).
+  `dfs` también es de C1, pero solo se compara en rutas (legs):
+  en misiones replanifica tras cada survey y oscila hasta agotar
+  la batería (ver `AGENTE.md`).
+- Metaheurísticas: `random`, `hill_climbing`,
+  `simulated_annealing`, `genetico`, `tabu`, `aco`.
+- Planificación (C2b, apartado B): `planificacion.py`, dominio
+  STRIPS en `rover-domain.pddl`, heurísticas h_max/h_add en
+  `planificacion_heuristica.py`.
+
+```bash
+# Experimento (único script: experimento_representativo.py).
+# Los experimentos viejo, grande y pequeño, y los scripts
+# analizar_grande.py, legs.py y barrido.py, se borraron: todo lo
+# que hacían está dentro de este script, en un solo diseño.
+# Diseño: 9 estratos (12x12, 16x16, 32x32 x z=3, 5, 7), asignación
+# igual por estrato, muestreo por hipercubo latino (LHS) para los
+# parámetros continuos y factores discretos equilibrados (POIs 3/5/7,
+# radio 1.0/1.8/2.5, diagonal sí/no, batería, memoria, bloqueos,
+# penalización de subida, bonus de survey, terrenos, bandas...).
+# Cada instancia lleva una configuración COMPLETA, nada queda por
+# defecto. Diseño pareado: la misma instancia corre con todos los
+# algoritmos, presupuesto igual (100 evaluaciones de órdenes).
+# Tamaño: con sigma piloto 27 y media 65, un margen del 20% al 95%
+# pide n=17 por estrato; el default 30 por estrato es conservador.
+# Gráficas: 11 PNG en --graficos (batería, interés y nodos por
+# buscador; interés y batería por metaheurística; por instancia;
+# más 4 agrupadas por nº de POIs). No falla si falta un algoritmo
+# o una métrica: omite la figura sin datos y sigue.
+python experimento_representativo.py --piloto
+# solo diseña y calcula n necesario, no corre misiones.
+python experimento_representativo.py --prueba
+# prueba pequeña: 2 instancias, todos los algoritmos, gráficas.
+# NO es el experimento completo.
+# python experimento_representativo.py --n-por-estrato 30
+# experimento completo: 270 instancias, 3240 misiones + legs.
+# NO correrlo sin tiempo de cómputo suficiente.
+```
+
+Los resultados del experimento pequeño y del completo son archivos
+JSONL (una fila por misión o por leg), con instancia, tamaño,
+profundidad, algoritmo, interés recolectado y entregado, batería,
+pasos, nodos y tiempo, para que cualquier tabla del informe se pueda
+recalcular desde el archivo, sin volver a correr nada.
+
 ```python
 from enviro.terrain import InstanceParams, MapGenerator
 
