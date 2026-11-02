@@ -75,8 +75,9 @@ python experimento_representativo.py --prueba
 # celdas, superficie, terrenos, alturas, estaciones, POIs,
 # POIs en estación o bloqueados, componentes conexas y POIs
 # alcanzables desde cualquier estación, desde la base, o
-# inalcanzables. Ojo: "bloqueada" incluye el interior sólido
-# de las lomas; la superficie transitable va aparte.
+# inalcanzables. Las celdas interiores NO se cuentan como
+# bloqueadas: son otro nivel bajo la superficie; solo la
+# superficie con roca o lava cuenta como bloqueada.
 python estadisticas_terreno.py --prueba
 # prueba: 2 instancias, las mismas de --prueba del experimento.
 python estadisticas_terreno.py --n-por-estrato 30

@@ -9,12 +9,12 @@ solo genera el terreno con `MapGenerator` y lo mide. No corre
 misiones, no usa el rover, no evalúa órdenes.
 
 Por instancia mide:
-  - celdas totales, bloqueadas y transitables; superficie (celda más
-    alta por columna) y superficie bloqueada. Ojo: "bloqueada" incluye
-    el interior sólido de las lomas (z menor que la altura de la
-    columna), no solo rocas y lava; por eso se dan aparte las
-    celdas interiores y la superficie transitable, que son las que
-    el rover puede pisar;
+  - celdas totales, interiores y de superficie; superficie bloqueada
+    y transitable. Las celdas interiores (z menor que la altura de
+    la columna) NO se cuentan como bloqueadas: son otro nivel, el
+    suelo sólido bajo la superficie, no un obstáculo. Solo cuenta
+    como bloqueada la superficie con roca o lava. Las celdas
+    transitables son, por tanto, la superficie transitable;
   - distribución de terrenos reales (plain, sand, rocky, crevasse, lava);
   - altura máxima por columna y si el mapa toca la capa máxima;
   - estaciones: número, posiciones;
@@ -121,12 +121,11 @@ def estadisticas_instancia(inst: Dict) -> Dict:
         "n_pois_config": inst["n_pois"],
         "semilla_mapa": inst["semilla_mapa"],
         "celdas_totales": len(celdas),
-        "celdas_bloqueadas": sum(1 for c in celdas.values() if c.blocked),
         "celdas_interiores": len(celdas) - len(superficie),
-        "celdas_transitables": sum(1 for c in celdas.values() if not c.blocked),
         "celdas_superficie": len(superficie),
         "superficie_bloqueada": sum(1 for c in superficie if c.blocked),
         "superficie_transitable": sum(1 for c in superficie if not c.blocked),
+        "celdas_transitables": sum(1 for c in superficie if not c.blocked),
         "terrenos": dict(terrenos),
         "altura_max_columna": dict(alturas),
         "toca_capa_maxima": max(tops.values()) == params.depth - 1 if tops else False,
@@ -160,8 +159,9 @@ def _resumen(filas: List[Dict]) -> Dict:
     return {
         "n_instancias": n,
         "celdas_totales_media": media("celdas_totales"),
-        "celdas_bloqueadas_media": media("celdas_bloqueadas"),
+        "celdas_interiores_media": media("celdas_interiores"),
         "superficie_bloqueada_media": media("superficie_bloqueada"),
+        "superficie_transitable_media": media("superficie_transitable"),
         "mapas_toca_capa_maxima": sum(1 for f in filas if f["toca_capa_maxima"]),
         "mapas_multicomponente": sum(1 for f in filas if f["superficie_multicomponente"]),
         "mapas_estaciones_mismo_componente": sum(1 for f in filas if f["estaciones_mismo_componente"]),
