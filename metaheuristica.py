@@ -145,7 +145,13 @@ class AlgoritmoGenetico:
             ganador = max(candidatos, key=lambda i: puntuaciones[i])
             return list(poblacion[ganador])
 
-        while len(cache) < self.presupuesto:
+        # Defensa: si el presupuesto supera el número de permutaciones
+        # posibles (con 5 POI, 5! = 120), el bucle anterior nunca
+        # terminaría; en ese caso se detiene al agotarlas.
+        max_distintos = 1
+        for n in range(2, len(orden_inicial) + 1):
+            max_distintos *= n
+        while len(cache) < self.presupuesto and len(cache) < max_distintos:
             ordenados = sorted(
                 range(len(poblacion)), key=lambda i: -puntuaciones[i]
             )

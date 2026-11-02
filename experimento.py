@@ -153,7 +153,10 @@ def _main(argv: List[str]) -> int:
     args = parser.parse_args(argv)
     if args.completo:
         instancias = INSTANCIAS_COMPLETAS
-        corridas, presupuesto = 5, 300
+        # Presupuesto 100, no 300: con 5 POI solo hay 5! = 120 órdenes
+        # distintos, así que un presupuesto de 300 órdenes distintos
+        # (el que cuenta el algoritmo genético) nunca se alcanzaría.
+        corridas, presupuesto = 5, 100
     else:
         instancias = INSTANCIAS_RAPIDAS
         corridas, presupuesto = 2, 100
