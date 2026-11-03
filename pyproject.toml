@@ -4,3 +4,10 @@ version = "0.1.0"
 description = "Deterministic synthetic 3D terrain generator for rover-exploration simulation"
 readme = "README.md"
 requires-python = ">=3.12"
+dependencies = [
+    # Solo para las gráficas de experimento_representativo.py.
+    # El generador, el rover, la búsqueda y la planificación son
+    # solo biblioteca estándar; sin matplotlib, el experimento corre
+    # igual pero no genera las 11 figuras PNG (avisa y sigue).
+    "matplotlib>=3.6",
+]
