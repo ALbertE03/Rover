@@ -198,7 +198,9 @@ def a_latex(resultado: Dict) -> str:
          ["interes_recolectado", "interes_entregado", "bateria_gastada_total", "pasos", "tiempo_segundos"]),
     ]:
         partes.append(f"% {titulo}\n\\begin{{tabular}}{{l{'c' * len(metricas)}}}")
-        partes.append(" & ".join([""] + metricas) + " \\\\")
+        # Los nombres de métrica llevan guion bajo, que en LaTeX fuera
+        # de modo matemático da "Missing $ inserted": se escapa.
+        partes.append(" & ".join([""] + [m.replace("_", r"\_") for m in metricas]) + " \\\\")
         for grupo, entrada in tabla.items():
             partes.append(" & ".join([NOMBRES.get(grupo, grupo)] + [celda(entrada[m]) for m in metricas]) + " \\\\")
         partes.append("\\end{tabular}\n")
