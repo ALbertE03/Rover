@@ -63,7 +63,38 @@ Por defecto (`uv run experimento_representativo.py`): 30 instancias por estrato,
 | `--piloto` | — | Solo diseña y calcula el n necesario, no corre misiones. |
 | `--prueba` | — | Prueba pequeña: 2 instancias del primer estrato, todos los algoritmos. No es el experimento completo. |
 
-Las Tablas 1-4 del informe se calculan desde el JSONL con `analizar_resultados.py` (media por instancia, desviación, IC95 y diferencias pareadas), y las estadísticas del terreno, sin misiones, con `estadisticas_terreno.py` (mismas instancias, salidas `stats_terreno.jsonl` y `resumen_terreno.json`).
+### Estadísticas del terreno — `estadisticas_terreno.py`
+
+```bash
+uv run estadisticas_terreno.py
+# o, para una prueba pequeña:
+uv run estadisticas_terreno.py --prueba
+```
+
+Usa exactamente las mismas instancias que el experimento (`generar_instancias`, mismas semillas de mapa y mismas configuraciones completas), pero solo genera el terreno con `MapGenerator.create()`: no corre misiones, no usa el rover ni evalúa órdenes. Por defecto escribe `stats_terreno.jsonl` (una fila por instancia) y `resumen_terreno.json` (el resumen, que también se imprime en consola).
+
+| Parámetro | Default | Qué hace |
+|---|---|---|
+| `--n-por-estrato` | 30 | Instancias por estrato; total = 9 × este número, las mismas del experimento. |
+| `--trabajadores` | 4 | Procesos en paralelo. |
+| `--salida` | `stats_terreno.jsonl` | JSONL de estadísticas por instancia; se sobrescribe en cada corrida, usa otro nombre para conservar una anterior. |
+| `--resumen` | `resumen_terreno.json` | JSON con el resumen agregado; también se imprime en consola. |
+| `--prueba` | — | Prueba pequeña: 2 instancias, las mismas de `--prueba` del experimento. |
+
+### Analizar resultados — `analizar_resultados.py`
+
+```bash
+uv run analizar_resultados.py
+# después de correr el experimento, con su JSONL en el directorio actual
+```
+
+No corre misiones ni genera mapas: lee el JSONL del experimento y calcula las Tablas 1-4 del informe (media por instancia, desviación, IC95 y diferencias pareadas). Las filas con `ok: False` no entran en las medias, se cuentan aparte, y las filas de legs con `poi: None` (fallo de generación de una instancia entera) tampoco. Imprime las tablas en consola y escribe el JSON con los números completos y el LaTeX listo para pegar en el informe.
+
+| Parámetro | Default | Qué hace |
+|---|---|---|
+| `--entrada` | `resultados_representativo.jsonl` | JSONL del experimento que se analiza; no se modifica. |
+| `--salida` | `tablas_resultados.json` | JSON con las cuatro tablas, con los números sin redondear de más (en la impresión, 3 decimales). |
+| `--latex` | `tablas_resultados.tex` | Las cuatro tablas en LaTeX. Cada celda es "media (DE) [IC95 inf, IC95 sup]"; en la Tabla 3, "media (DE)". |
 
 
 Los resultados del experimento pequeño y del completo son archivos
