@@ -36,8 +36,7 @@ uv run experimento_representativo.py
 # parámetros continuos y factores discretos equilibrados (POIs 3/5/7,
 # radio 1.0/1.8/2.5, diagonal sí/no, batería, memoria, bloqueos,
 # penalización de subida, bonus de survey, terrenos, bandas...).
-# Cada instancia lleva una configuración COMPLETA, nada queda por
-# defecto. Diseño pareado: la misma instancia corre con todos los
+# Cada instancia lleva una configuración COMPLETA. Diseño pareado: la misma instancia corre con todos los
 # algoritmos, presupuesto igual (100 evaluaciones de órdenes).
 
 python experimento_representativo.py --piloto
@@ -99,7 +98,7 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 | `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
 | `network` | `stations`: lista de ids (una estación es una celda: hay que pararse en ella para transmitir o recargar) |
 | `poi` | `count`, `min_visibility`, pesos de interés |
-| `rover` | `battery`, `memory` |
+| `rover` | `battery`, `memory`, `reserve_margin` (margen de retorno) |
 | `terrain` | Catálogo: `cost`, `visibility`, `glyph` por tipo |
 
 ## Configuración del consumidor
