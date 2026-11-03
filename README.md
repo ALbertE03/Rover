@@ -8,145 +8,64 @@ La misma semilla produce siempre el mismo mapa.
 ```bash
 git clone https://github.com/ALbertE03/Rover.git
 cd Rover
-python rover.py 42
 ```
-
-El enlace para clonar es https://github.com/ALbertE03/Rover.git
-(si prefieres descargarlo sin git, en GitHub: Code → Download ZIP).
-
-## Cómo correr el proyecto (agente rover)
-
-Todo se corre desde la raíz del repo clonado, con Python ≥ 3.12. El
-generador, el rover, la búsqueda y la planificación son solo biblioteca
-estándar; la única dependencia es matplotlib, solo para las gráficas
-del experimento (está en `pyproject.toml`, así que `uv run` la instala
-sola; sin ella, el experimento corre igual pero avisa y no genera PNG).
+## Cómo correr el proyecto 
 
 ```bash
-# Una misión (semilla 42 por defecto, SA + A*)
-python rover.py 42
-
-# Una misión con otro buscador o metaheurística
-python rover.py 42   # el buscador y la meta se eligen en rover.py / ejecutar_mision
-```
-
-Algoritmos que existen, **solo de las conferencias** (C1, C2b y
-metaheurísticas). Cualquier otro algoritmo fue eliminado, no está
-en el código:
-
-- Búsqueda (C1): `a_star`, `dijkstra` (= coste uniforme), `greedy`,
-  `bfs`, `weighted` (A* ponderado, w = 2.0), `beam` (ancho 20).
-  `dfs` también es de C1, pero solo se compara en rutas (legs):
-  en misiones replanifica tras cada survey y oscila hasta agotar
-  la batería (ver `AGENTE.md`).
-- Metaheurísticas: `random`, `hill_climbing`,
-  `simulated_annealing`, `genetico`, `tabu`, `aco`.
-- Planificación (C2b, apartado B): `planificacion.py`, dominio
-  STRIPS en `rover-domain.pddl`.
-
-```bash
-# Experimento representativo (`experimento_representativo.py`)
-
-Diseño: 9 estratos (12x12, 16x16, 32x32 x z=3, 5, 7), asignación
-igual por estrato, muestreo por hipercubo latino (LHS) para los
-parámetros continuos y factores discretos equilibrados (POIs 3/5/7,
-radio 1.0/1.8/2.5, diagonal sí/no, batería, memoria, bloqueos,
-penalización de subida, bonus de survey, terrenos, bandas...).
-Cada instancia lleva una configuración COMPLETA, nada queda por
-defecto. Diseño pareado: la misma instancia corre con todos los
-algoritmos, presupuesto igual (100 evaluaciones de órdenes).
-Tamaño: con sigma piloto 27 y media 65, un margen del 20% al 95%
-pide n=17 por estrato; el default 30 por estrato es conservador.
-
-## Correrlo por defecto
-
-```bash
-python experimento_representativo.py
-# o, con uv (instala matplotlib desde pyproject.toml):
+uv sync
 uv run experimento_representativo.py
 ```
 
-Por defecto: 30 instancias por estrato, 270 instancias, 3240 misiones
-(12 por instancia: 6 buscadores y 6 metaheurísticas) + legs, con
-4 trabajadores. Escribe `resultados_representativo.jsonl` (una fila
-por misión y por leg), `instancias_representativo.json` (las 270
-instancias con su configuración completa y su semilla de mapa,
-20000 + id) y 11 figuras PNG en `figuras_representativo/`
-(batería, interés y nodos por buscador; interés y batería por
-metaheurística; batería por instancia y buscador; interés por
-instancia y metaheurística; más 4 agrupadas por nº de POIs).
-Al final imprime "fin". Si una instancia no se puede generar
-(como la 2, sin celdas observables), sus misiones quedan con
-`ok: False` y sus legs con una fila de error, sin abortar la corrida.
+`uv sync` instala las dependencias de `pyproject.toml` (solo matplotlib, para las gráficas; el generador, el rover, la búsqueda y la planificación son solo biblioteca estándar). Una misión suelta se corre con `uv run rover.py 42`.
 
-## Cada parámetro
+- Búsqueda: `a_star`, `dijkstra` (= coste uniforme), `greedy`,
+  `bfs`, `weighted` (A* ponderado, w = 2.0), `beam` (ancho 20).
+  `dfs` pero solo se compara en rutas (legs):
+  en misiones replanifica tras cada survey y oscila hasta agotar
+  la batería.
+- Metaheurísticas: `random`, `hill_climbing`,
+  `simulated_annealing`, `genetico`, `tabu`, `aco`.
+- Planificación: `planificacion.py`, dominio
+  STRIPS en `rover-domain.pddl`.
+
+```bash
+# Experimento (único script: experimento_representativo.py).
+
+# Diseño: 9 estratos (12x12, 16x16, 32x32 x z=3, 5, 7), asignación
+# igual por estrato, muestreo por hipercubo (LHS) para los
+# parámetros continuos y factores discretos equilibrados (POIs 3/5/7,
+# radio 1.0/1.8/2.5, diagonal sí/no, batería, memoria, bloqueos,
+# penalización de subida, bonus de survey, terrenos, bandas...).
+# Cada instancia lleva una configuración COMPLETA, nada queda por
+# defecto. Diseño pareado: la misma instancia corre con todos los
+# algoritmos, presupuesto igual (100 evaluaciones de órdenes).
+
+python experimento_representativo.py --piloto
+# solo diseña y calcula n necesario, no corre misiones.
+
+python experimento_representativo.py --prueba
+# prueba pequeña: 2 instancias, todos los algoritmos, gráficas.
+```
+
+Por defecto (`uv run experimento_representativo.py`): 30 instancias por estrato, 270 instancias, 3240 misiones (12 por instancia) + legs, 4 trabajadores. Escribe `resultados_representativo.jsonl`, `instancias_representativo.json` (configuración completa y semilla 20000 + id) y 11 figuras PNG en `figuras_representativo/`, y termina imprimiendo "fin". Si una instancia no se puede generar (como la 2, sin celdas observables), sus misiones quedan con `ok: False` y sus legs con una fila de error, sin abortar la corrida.
+
+### Parámetros de `experimento_representativo.py`
 
 | Parámetro | Default | Qué hace |
 |---|---|---|
-| `--n-por-estrato` | 30 | Instancias por estrato. El total es 9 × este número: 1 → 9 instancias (108 misiones), 3 → 27 instancias (324 misiones), 30 → 270 instancias (3240 misiones). Para probar con menos estratos en tiempo, baja este número; los 9 estratos siempre están, con menos instancias cada uno. No hay un parámetro para elegir un solo estrato. |
-| `--trabajadores` | 4 | Procesos en paralelo (`multiprocessing.Pool`). Súbelo si tienes más núcleos; bájalo a 1 si la máquina se queda sin memoria. |
-| `--salida` | `resultados_representativo.jsonl` | Archivo JSONL de resultados. Se abre en escritura ("w"), así que cada corrida lo sobrescribe: usa otro nombre si quieres conservar una corrida anterior. |
-| `--instancias` | `instancias_representativo.json` | Archivo JSON con las instancias generadas (id, estrato, tamaño, profundidad, semilla de mapa y configuración completa). Sirve para reproducir cualquier resultado sin volver a muestrear. |
-| `--graficos` | `figuras_representativo` | Carpeta donde se guardan las 11 figuras PNG. Si matplotlib no está instalado, avisa y sigue sin figuras, sin abortar. |
-| `--modo` | `ambos` | Qué correr: `misiones` (solo las 12 misiones por instancia), `legs` (solo las rutas base→POI, con DFS incluido) o `ambos` (misiones + legs). Con `--modo legs` no se generan figuras de misiones. |
-| `--presupuesto` | 100 | Evaluaciones de órdenes por metaheurística. No son generaciones: el genético, por ejemplo, se detiene al agotar las permutaciones distintas (con 5 POIs solo hay 120). |
-| `--semilla-meta` | 7 | Semilla de las metaheurísticas. La misma para todas, para que la comparación sea pareada. |
-| `--piloto` | (apagado) | Solo diseña y calcula el n necesario (sigma 27, media 65, márgenes 20% y 10%). No corre ninguna misión. |
-| `--prueba` | (apagado) | Prueba pequeña: 2 instancias del primer estrato (12x12_z3, con 3 y 5 POIs), todos los algoritmos, misiones + legs + gráficas. Sirve para verificar que el código funciona; NO es el experimento completo ni parte del muestreo. |
+| `--n-por-estrato` | 30 | Instancias por estrato; total = 9 × este número (1 → 9 instancias, 3 → 27, 30 → 270). Los 9 estratos siempre están; no hay parámetro para elegir un solo estrato. |
+| `--trabajadores` | 4 | Procesos en paralelo. |
+| `--salida` | `resultados_representativo.jsonl` | JSONL de resultados; se sobrescribe en cada corrida, usa otro nombre para conservar una anterior. |
+| `--instancias` | `instancias_representativo.json` | JSON con las instancias y su configuración completa. |
+| `--graficos` | `figuras_representativo` | Carpeta de las 11 figuras PNG; sin matplotlib avisa y sigue sin figuras. |
+| `--modo` | `ambos` | `misiones`, `legs` o `ambos`. |
+| `--presupuesto` | 100 | Evaluaciones de órdenes por metaheurística, no generaciones. |
+| `--semilla-meta` | 7 | Semilla de las metaheurísticas, la misma para todas (diseño pareado). |
+| `--piloto` | — | Solo diseña y calcula el n necesario, no corre misiones. |
+| `--prueba` | — | Prueba pequeña: 2 instancias del primer estrato, todos los algoritmos. No es el experimento completo. |
 
-## Ejemplos
+Las Tablas 1-4 del informe se calculan desde el JSONL con `analizar_resultados.py` (media por instancia, desviación, IC95 y diferencias pareadas), y las estadísticas del terreno, sin misiones, con `estadisticas_terreno.py` (mismas instancias, salidas `stats_terreno.jsonl` y `resumen_terreno.json`).
 
-```bash
-# Solo diseñar, sin correr nada:
-python experimento_representativo.py --piloto
-
-# Prueba pequeña (2 instancias, rápida):
-python experimento_representativo.py --prueba
-
-# Pocos estratos en tiempo: 3 por estrato = 27 instancias, 324 misiones + legs:
-python experimento_representativo.py --n-por-estrato 3
-
-# Solo misiones, guardando en archivos distintos para no pisar el completo:
-python experimento_representativo.py --modo misiones --salida resultados_misiones.jsonl --graficos figuras_misiones
-
-# Solo legs, con 8 trabajadores:
-python experimento_representativo.py --modo legs --trabajadores 8
-
-# Experimento completo (270 instancias, 3240 misiones + legs):
-# NO correrlo sin tiempo de cómputo suficiente.
-python experimento_representativo.py --n-por-estrato 30
-```
-
-## Estadísticas de las tablas
-
-Las tablas del informe (Tablas 1-4) no se rellenan solas desde las
-figuras: se calculan desde el JSONL con `analizar_resultados.py`
-(media por instancia primero, media, desviación e IC95, diferencias
-pareadas contra A* y contra random, fallos contados aparte):
-
-```bash
-python analizar_resultados.py --entrada resultados_representativo.jsonl
-# escribe tablas_resultados.json y tablas_resultados.tex, e imprime las tablas
-```
-
-## Estadísticas del terreno, aparte y sin misiones
-
-Usa las mismas instancias, semillas y configs del experimento
-(`generar_instancias`), pero solo genera el terreno y lo mide:
-celdas, superficie, terrenos, alturas, estaciones, POIs,
-POIs en estación o bloqueados, componentes conexas y POIs
-alcanzables desde cualquier estación, desde la base, o
-inalcanzables. Las celdas interiores NO se cuentan como
-bloqueadas: son otro nivel bajo la superficie; solo la
-superficie con roca o lava cuenta como bloqueada.
-
-```bash
-python estadisticas_terreno.py --prueba
-# prueba: 2 instancias, las mismas de --prueba del experimento.
-python estadisticas_terreno.py --n-por-estrato 30
-# completo: 270 instancias, salidas stats_terreno.jsonl (una fila
-# por instancia) y resumen_terreno.json (agregado).
-```
 
 Los resultados del experimento pequeño y del completo son archivos
 JSONL (una fila por misión o por leg), con instancia, tamaño,
@@ -180,7 +99,7 @@ semilla ─▶ parámetros ─▶ relieve ─▶ suelo ─▶ obstáculos ─▶
 | `movement` | `radius` (paso), `climb_penalty`, `survey_height_bonus`, `allow_diagonal` |
 | `network` | `stations`: lista de ids (una estación es una celda: hay que pararse en ella para transmitir o recargar) |
 | `poi` | `count`, `min_visibility`, pesos de interés |
-| `rover` | `battery`, `memory` (declarados; el generador no los gasta) |
+| `rover` | `battery`, `memory` |
 | `terrain` | Catálogo: `cost`, `visibility`, `glyph` por tipo |
 
 ## Configuración del consumidor
@@ -265,7 +184,7 @@ que lo elijan como dominante.
 ├── main.py                  # estadísticas agregadas de un lote de terrenos
 ├── experimento_representativo.py  # experimento: 9 estratos, misiones + legs + 11 gráficas
 ├── estadisticas_terreno.py      # estadísticas del terreno, sin misiones
-├── analizar_resultados.py       # Tablas 1-4 desde el JSONL (media, DE, IC95, pareadas)
+├── analizar_resultados.py       # Tablas 1-4 desde el JSONL
 ├── enviro/
 │   ├── README.md            # explicación paso a paso de la generación
 │   ├── config.py            # carga del JSON
