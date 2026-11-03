@@ -88,7 +88,7 @@ uv run analizar_resultados.py
 # después de correr el experimento, con su JSONL en el directorio actual
 ```
 
-No corre misiones ni genera mapas: lee el JSONL del experimento y calcula las Tablas 1-4 del informe (media por instancia, desviación, IC95 y diferencias pareadas). Las filas con `ok: False` no entran en las medias, se cuentan aparte, y las filas de legs con `poi: None` (fallo de generación de una instancia entera) tampoco. Imprime las tablas en consola y escribe el JSON con los números completos y el LaTeX listo para pegar en el informe.
+No corre misiones ni genera mapas: lee el JSONL del experimento y calcula las Tablas 1-4 del informe (media por instancia, desviación, IC95 y diferencias pareadas). Las filas con `ok: False` no entran en las medias, se cuentan aparte, y las filas de legs con `poi: None` (fallo de generación de una instancia entera) tampoco. Imprime las tablas en consola y escribe el JSON con los números completos y solo las cuatro tablas en LaTeX (`tablas_resultados.tex`): solo los entornos `tabular`, sin documento ni formato de página, así que al pegarlas hay que ajustar tamaño y ancho.
 
 | Parámetro | Default | Qué hace |
 |---|---|---|
