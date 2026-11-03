@@ -180,7 +180,6 @@ que lo elijan como dominante.
 
 ```
 ├── config/default.json      # toda la configuración
-├── main.py                  # estadísticas agregadas de un lote de terrenos
 ├── experimento_representativo.py  # experimento: 9 estratos, misiones + legs + 11 gráficas
 ├── estadisticas_terreno.py      # estadísticas del terreno, sin misiones
 ├── analizar_resultados.py       # Tablas 1-4 desde el JSONL

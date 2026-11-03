@@ -1,74 +1,5 @@
 from __future__ import annotations
 
-"""Experimento estadísticamente representativo del rover.
-
-Este es el ÚNICO script de experimentos del proyecto. Sustituye a
-experimento.py, experimento_grande.py, experimento_pequeno.py,
-analizar_grande.py, legs.py y barrido.py, que se borraron para no
-tener tres experimentos distintos. Todo lo que hacían esos scripts
-(misiones, legs con DFS, análisis, gráficas, barrido de parámetros)
-está aquí, en un solo diseño.
-
-Diseño, en resumen:
-
-- Estratos: tamaño (12x12, 16x16, 32x32) x profundidad (z=3, 5, 7),
-  9 estratos. Dentro de cada estrato se sortean n instancias con
-  la misma n para todos los estratos (asignación igual), para que
-  ningún tamaño domine el resumen general.
-- Muestreo: hipercubo latino (Latin Hypercube Sampling, LHS) para
-  los parámetros continuos: el rango de cada parámetro se divide
-  en n intervalos iguales, se sortea un punto en cada intervalo y
-  se permutan los órdenes de forma independiente entre parámetros.
-  Así cada parámetro cubre todo su rango, sin aglomerarse en una
-  zona por azar, y las combinaciones son aleatorias. Los
-  parámetros discretos (nº de POIs, radio de movimiento, diagonal,
-  piscinas de lava, biomas, batería, memoria) se reparten de forma
-  equilibrada dentro de cada estrato: cada valor aparece casi el
-  mismo número de veces.
-- Nada por defecto: cada instancia lleva una configuración
-  COMPLETA, con todas las secciones explícitas (generación, mapa,
-  movimiento, red, POI, rover, terreno). InstanceParams hace
-  merge sobre el default, pero aquí no hay nada que heredar: todos
-  los valores que importan están sorteados en la instancia.
-- Diseño pareado: la misma instancia se corre con todos los
-  algoritmos (búsqueda y metaheurísticas), así que la comparación
-  es por instancia, no entre instancias distintas. Los buscadores
-  son deterministas (1 corrida por instancia); las metaheurísticas
-  usan semilla declarada (7 por defecto, configurable).
-- Tamaño de muestra: con una desviación piloto sigma y una media
-  mu, el n necesario para un margen relativo m al 95% es
-  n = (1.96 * sigma / (m * mu))^2. Con los datos piloto de la
-  corrida de prueba (batería: sigma ~27, media ~65), un margen
-  del 20% pide n ~ 17 por estrato; el default de 30 por estrato
-  es, por tanto, conservador para ese margen, y además hace que
-  la media sea aproximadamente normal por el teorema central del
-  límite. La función calcular_n() calcula esto para cualquier
-  sigma/margen, y --piloto lo imprime sin correr misiones.
-- Presupuesto igual: todas las metaheurísticas reciben 100
-  evaluaciones de órdenes (con 5 POIs hay 120 órdenes distintos,
-  así que 100 es alcanzable; con 7 POIs, 5040, es un muestreo).
-- Análisis: media, desviación, IC95 sobre medias por instancia
-  (nunca corridas mezcladas), diferencias pareadas por instancia
-  contra A* (búsqueda) y contra random (metaheurísticas), y
-  resúmenes agrupados por estrato y por nº de POIs.
-
-Algoritmos, solo de las conferencias (C1, C2b, metaheurísticas):
-búsqueda en misiones: a_star, dijkstra, greedy, bfs, weighted,
-beam; en legs también dfs (en misiones oscila al replanificar,
-ver AGENTE.md). Metaheurísticas: random, hill_climbing,
-simulated_annealing, genetico, tabu, aco. No hay DE, PSO ni GRASP.
-
-Uso:
-  python experimento_representativo.py --piloto
-      # solo diseña instancias y calcula n necesario, no corre nada
-  python experimento_representativo.py --prueba
-      # prueba pequeña: 2 instancias, todos los algoritmos,
-      # gráficas, para ver que funciona. NO es el experimento completo.
-  python experimento_representativo.py --n-por-estrato 30
-      # experimento completo. NO correrlo sin tiempo: son
-      # 9 estratos x 30 x 12 misiones = 3240 misiones + legs.
-"""
-
 import argparse
 import json
 import math
@@ -409,7 +340,6 @@ def _legs_instancia(inst: Dict) -> List[Dict]:
                     }
                 )
     return filas
-
 
 
 def generar_graficas(res_busqueda, res_meta, directorio: str) -> None:

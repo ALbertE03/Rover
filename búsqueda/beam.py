@@ -23,7 +23,7 @@ def beam_search(
     heuristic: Heuristic,
     ancho: int = 20,
 ) -> Optional[AStarResult]:
-    """Beam search with width ``ancho``, conference C1.
+    """Beam search with width ``ancho``.
 
     Like A*, it orders the frontier by f(n) = g(n) + h(n), but it keeps
     only the ``ancho`` best frontier nodes and discards the rest.

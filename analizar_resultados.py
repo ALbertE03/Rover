@@ -1,46 +1,5 @@
 from __future__ import annotations
 
-"""Estadísticas de las Tablas 1-4 del informe, desde el JSONL del experimento.
-
-Lee el archivo que escribe `experimento_representativo.py`
-(`resultados_representativo.jsonl` por defecto) y calcula, sin inventar
-nada, lo que las tablas piden:
-
-- Tabla 1: búsqueda, orden fijo, sin metaheurística (meta == "ninguna").
-- Tabla 2: metaheurísticas, con A* fijo.
-- Tabla 3: interés entregado medio, agrupado por nº de POIs (3/5/7),
-  para cada buscador y cada metaheurística.
-- Tabla 4: legs, base a cada POI, con DFS incluido.
-
-Reglas de cálculo (las mismas que las gráficas del experimento):
-- Primero media por instancia (una misión por instancia y algoritmo,
-  así que suele ser el propio valor), y después media, desviación
-  estándar e IC95 sobre esas medias por instancia. Nunca se mezclan
-  corridas de instancias distintas en una sola media.
-- IC95 = media +/- 1.96 * desviación / sqrt(n), con n = nº de
-  instancias. Con n = 1 no hay desviación ni IC95 (se deja en None).
-- Diferencias pareadas: por instancia, valor del algoritmo menos
-  valor de la referencia (A* en Tabla 1, random en Tabla 2); solo las
-  instancias donde ambos están presentes y con ok = True. Se informa
-  su media, desviación e IC95 igual que arriba.
-- Las filas con ok = False NO entran en las medias: se cuentan aparte
-  (n_fallidas, instancias_fallidas) para que el fallo no se esconda.
-  Las filas de legs con poi = None son el fallo de generación de una
-  instancia entera (ver `experimento_representativo.py`): tampoco
-  entran en las medias de legs, se cuentan aparte.
-
-Salida:
-- En consola: las cuatro tablas en forma legible.
-- `--salida` (por defecto `tablas_resultados.json`): todo lo anterior
-  en JSON, con los números sin redondear de más (3 decimales en la
-  impresión, valor completo en el JSON).
-- `--latex` (por defecto `tablas_resultados.tex`): las cuatro tablas
-  en LaTeX, listas para pegar en el informe. Cada celda es
-  "media (DE) [IC95 inf, IC95 sup]"; en la Tabla 3, "media (DE)".
-
-Solo biblioteca estándar. No corre misiones ni genera mapas.
-"""
-
 import argparse
 import json
 import math

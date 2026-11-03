@@ -1,48 +1,5 @@
 from __future__ import annotations
 
-"""Estadísticas del terreno, sin misiones.
-
-Script aparte del experimento: usa EXACTAMENTE las mismas instancias
-que `experimento_representativo.py` (misma función `generar_instancias`,
-mismas semillas de mapa y mismas configuraciones completas), pero
-solo genera el terreno con `MapGenerator` y lo mide. No corre
-misiones, no usa el rover, no evalúa órdenes.
-
-Por instancia mide:
-  - celdas totales, interiores y de superficie; superficie bloqueada
-    y transitable. Las celdas interiores (z menor que la altura de
-    la columna) NO se cuentan como bloqueadas: son otro nivel, el
-    suelo sólido bajo la superficie, no un obstáculo. Solo cuenta
-    como bloqueada la superficie con roca o lava. Las celdas
-    transitables son, por tanto, la superficie transitable;
-  - distribución de terrenos reales (plain, sand, rocky, crevasse, lava);
-  - altura máxima por columna y si el mapa toca la capa máxima;
-  - estaciones: número, posiciones;
-  - POIs: número, interés medio/mínimo/máximo, POIs sobre una
-    estación (debe ser 0: el generador los excluye), POIs en celdas
-    bloqueadas (debe ser 0);
-  - conectividad sobre celdas transitables con los offsets de
-    movimiento de la instancia: número de componentes, tamaño del
-    componente mayor, si la superficie es multicomponente, si todas
-    las estaciones están en el mismo componente, POIs alcanzables
-    desde cualquier estación, desde la base sola, e inalcanzables,
-    y POIs en componentes de una sola celda.
-
-"Alcanzable" aquí significa: la celda del POI está en el mismo
-componente conexo que la estación, con los pasos de la instancia
-(radio y diagonal de su config). No es observabilidad ni coste:
-un POI inalcanzable puede ser intencional (el generador no
-garantiza que todo POI sea alcanzable).
-
-Uso:
-  python estadisticas_terreno.py --prueba
-      # 2 instancias, las mismas de la prueba del experimento.
-  python estadisticas_terreno.py --n-por-estrato 30
-      # las 270 instancias del experimento completo, solo terreno.
-  python estadisticas_terreno.py --n-por-estrato 30 \
-      --salida stats_terreno.jsonl --resumen resumen_terreno.json
-"""
-
 import argparse
 import json
 import random

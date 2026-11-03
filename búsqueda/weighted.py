@@ -22,7 +22,7 @@ def weighted_a_star(
     heuristic: Heuristic,
     peso: float = 2.0,
 ) -> Optional[AStarResult]:
-    """Weighted A*: f(n) = g(n) + w * h(n), conference C1.
+    """Weighted A*: f(n) = g(n) + w * h(n).
 
     With w = 1 this is A*. With w > 1 the heuristic is no longer
     admissible, so optimality is lost, but the search is usually
