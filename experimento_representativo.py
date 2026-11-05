@@ -485,7 +485,7 @@ def main() -> int:
     if args.piloto:
         print("Diseño: 9 estratos (3 tamaños x 3 profundidades), asignación igual.")
         print(f"n por estrato (default): {args.n_por_estrato} -> instancias totales: {9 * args.n_por_estrato}")
-        print(f"Misiones totales (12 por instancia): {9 * args.n_por_estrato * 12}")
+        print(f"Misiones totales (42 por instancia, factorial buscador x meta): {9 * args.n_por_estrato * 42}")
         for sigma, media, margen in [(27.0, 65.0, 0.20), (27.0, 65.0, 0.10), (10.0, 65.0, 0.20)]:
             print(f"  sigma={sigma}, media={media}, margen={int(margen*100)}% -> n necesario por estrato: {calcular_n(sigma, media, margen)}")
         print("Con sigma=27, media=65, margen 20%: n=17; el default 30 es conservador.")
@@ -507,10 +507,15 @@ def main() -> int:
     tareas = []
     if args.modo in ("misiones", "ambos"):
         for inst in instancias:
+            # Diseño factorial: cada buscador con cada metaheurística,
+            # más el orden fijo (meta "ninguna") por buscador.
+            # 6 buscadores x (1 orden fijo + 6 metas) = 42 misiones
+            # por instancia. Antes eran 12: 6 buscadores con orden fijo
+            # más 6 metas solo con A*, así que las demás combinaciones
+            # (p. ej. Greedy con Tabú) nunca se corrían.
             for bus in BUSQUEDAS_MISION:
-                tareas.append({"instancia": inst, "busqueda": bus, "meta": "ninguna", "presupuesto": args.presupuesto, "semilla_meta": args.semilla_meta})
-            for meta in METAS:
-                tareas.append({"instancia": inst, "busqueda": "a_star", "meta": meta, "presupuesto": args.presupuesto, "semilla_meta": args.semilla_meta})
+                for meta in ["ninguna"] + METAS:
+                    tareas.append({"instancia": inst, "busqueda": bus, "meta": meta, "presupuesto": args.presupuesto, "semilla_meta": args.semilla_meta})
     res_busqueda: Dict = {}
     res_meta: Dict = {}
     with open(args.salida, "w") as f:
@@ -536,7 +541,10 @@ def main() -> int:
         if "poi" in r:
             continue
         destino = res_busqueda if r["meta"] == "ninguna" else res_meta
-        clave = r["busqueda"] if r["meta"] == "ninguna" else r["meta"]
+        # Antes la clave de una meta era solo la meta, así que una fila
+        # Greedy con Tabú se mezclaba con la de A* con Tabú. En el
+        # diseño factorial la clave es la pareja buscador#meta.
+        clave = r["busqueda"] if r["meta"] == "ninguna" else f"{r['busqueda']}#{r['meta']}"
         destino.setdefault(clave, {}).setdefault(r["estrato"] + "#" + str(r["instancia"]), []).append(r)
     print(f"Generando gráficas en {args.graficos} ...")
     generar_graficas(res_busqueda or None, res_meta or None, args.graficos)
