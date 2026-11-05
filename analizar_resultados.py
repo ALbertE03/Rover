@@ -108,13 +108,7 @@ def analizar(entrada: Path) -> Dict:
     fallidas_leg_generacion = sorted({f["instancia"] for f in legs if not f.get("ok") and f.get("poi") is None})
 
     busqueda = [f for f in misiones_ok if f.get("meta") == "ninguna"]
-    # Detalle de metas con A* fijo (se conserva en el JSON y en la
-    # Tabla 3): en un JSONL factorial, agrupar todas las metas sin
-    # filtrar el buscador mezclaría, por ejemplo, Greedy con Tabú y
-    # A* con Tabú. La Tabla 2 del LaTeX ya no es este detalle, es la
-    # matriz de interacción completa.
-    metas = [f for f in misiones_ok if f.get("meta") != "ninguna" and f.get("busqueda") == "a_star"]
-    metas_todas = [f for f in misiones_ok if f.get("meta") != "ninguna"]
+    metas = [f for f in misiones_ok if f.get("meta") != "ninguna"]
     metricas_mision = [
         "interes_recolectado",
         "interes_entregado",
@@ -152,36 +146,6 @@ def analizar(entrada: Path) -> Dict:
                 str(n): resumen(vals) for n, vals in sorted(por_pois.items())
             }
 
-    # Tabla de interacción buscador x metaheurística: interés entregado
-    # medio (desviación) por pareja. Cada pareja tiene una misión por
-    # instancia, así que la lista de valores ya es una media por instancia.
-    tabla_interaccion: Dict[str, Dict] = {}
-    for bus in BUSQUEDAS_MISION:
-        tabla_interaccion[bus] = {
-            meta: resumen([
-                f["interes_entregado"] for f in metas_todas
-                if f.get("busqueda") == bus and f.get("meta") == meta
-                and f.get("interes_entregado") is not None
-            ])
-            for meta in METAS
-        }
-    # Diferencias pareadas dentro de cada buscador: cada meta menos el
-    # orden fijo (meta "ninguna") con ese mismo buscador, por instancia.
-    por_instancia_inter: Dict[tuple, float] = {}
-    for f in misiones_ok:
-        if f.get("interes_entregado") is not None:
-            por_instancia_inter[(f["busqueda"], f["meta"], f["instancia"])] = f["interes_entregado"]
-    dif_interaccion: Dict[str, Dict] = {}
-    for bus in BUSQUEDAS_MISION:
-        dif_interaccion[bus] = {}
-        for meta in METAS:
-            diffs = [
-                por_instancia_inter[(bus, meta, inst)] - por_instancia_inter[(bus, "ninguna", inst)]
-                for inst in {i for b, m, i in por_instancia_inter if b == bus and m == meta}
-                if (bus, "ninguna", inst) in por_instancia_inter
-            ]
-            dif_interaccion[bus][meta] = resumen(diffs)
-
     # Tabla 4: legs por buscador.
     tabla4: Dict[str, Dict] = {}
     for bus in BUSQUEDAS_LEG:
@@ -210,8 +174,6 @@ def analizar(entrada: Path) -> Dict:
         "tabla1_diferencias_pareadas_vs_a_star": dif1,
         "tabla2_metaheuristicas": tabla2,
         "tabla2_diferencias_pareadas_vs_random": dif2,
-        "tabla_interaccion_busqueda_meta": tabla_interaccion,
-        "interaccion_diferencias_vs_ninguna": dif_interaccion,
         "tabla3_interes_por_pois": tabla3,
         "tabla4_legs": tabla4,
     }
@@ -229,36 +191,19 @@ def celda(res: Dict) -> str:
 
 def a_latex(resultado: Dict) -> str:
     partes = []
-    # Tabla 1: búsqueda, orden fijo, sin metaheurística.
-    tabla1 = resultado["tabla1_busqueda"]
-    metricas1 = ["interes_recolectado", "interes_entregado", "bateria_gastada_total", "nodos_expandidos", "tiempo_segundos"]
-    partes.append(f"% Tabla 1: búsqueda, orden fijo, sin metaheurística\n\\begin{{tabular}}{{l{'c' * len(metricas1)}}}")
-    # Los nombres de métrica llevan guion bajo, que en LaTeX fuera
-    # de modo matemático da "Missing $ inserted": se escapa.
-    partes.append(" & ".join([""] + [m.replace("_", r"\_") for m in metricas1]) + " \\\\")
-    for grupo, entrada in tabla1.items():
-        partes.append(" & ".join([NOMBRES.get(grupo, grupo)] + [celda(entrada[m]) for m in metricas1]) + " \\\\")
-    partes.append("\\end{tabular}\n")
-    # Tabla 2, UNA SOLA tabla de metaheurísticas: la matriz de
-    # interacción buscador x meta, con A* como una fila más entre los
-    # buscadores, no como una tabla aparte. El detalle por métrica de
-    # las metas con A* sigue estando en el JSON (tabla2_metaheuristicas),
-    # pero en LaTeX no se separa.
-    partes.append("% Tabla 2: metaheurísticas por buscador, interés entregado medio (desviación), presupuesto 100.")
-    partes.append("\\begin{tabular}{lcccccc}")
-    partes.append("Buscador & Random & Hill climbing & Simulated annealing & Genético & Tabú & ACO \\\\")
-    for bus, fila in resultado["tabla_interaccion_busqueda_meta"].items():
-        celdas = []
-        for meta in METAS:
-            r = fila.get(meta, {"media": None, "de": None})
-            if r["media"] is not None and r["de"] is not None:
-                celdas.append(f"{r['media']:.3f} ({r['de']:.3f})")
-            elif r["media"] is not None:
-                celdas.append(f"{r['media']:.3f}")
-            else:
-                celdas.append("")
-        partes.append(" & ".join([NOMBRES.get(bus, bus)] + celdas) + " \\\\")
-    partes.append("\\end{tabular}\n")
+    for titulo, tabla, metricas in [
+        ("Tabla 1: búsqueda, orden fijo, sin metaheurística", resultado["tabla1_busqueda"],
+         ["interes_recolectado", "interes_entregado", "bateria_gastada_total", "nodos_expandidos", "tiempo_segundos"]),
+        ("Tabla 2: metaheurísticas, A* fijo, presupuesto 100", resultado["tabla2_metaheuristicas"],
+         ["interes_recolectado", "interes_entregado", "bateria_gastada_total", "pasos", "tiempo_segundos"]),
+    ]:
+        partes.append(f"% {titulo}\n\\begin{{tabular}}{{l{'c' * len(metricas)}}}")
+        # Los nombres de métrica llevan guion bajo, que en LaTeX fuera
+        # de modo matemático da "Missing $ inserted": se escapa.
+        partes.append(" & ".join([""] + [m.replace("_", r"\_") for m in metricas]) + " \\\\")
+        for grupo, entrada in tabla.items():
+            partes.append(" & ".join([NOMBRES.get(grupo, grupo)] + [celda(entrada[m]) for m in metricas]) + " \\\\")
+        partes.append("\\end{tabular}\n")
     partes.append("% Tabla 3: interés entregado medio, agrupado por nº de POIs")
     partes.append("\\begin{tabular}{lccc}")
     partes.append("Algoritmo & 3 POIs & 5 POIs & 7 POIs \\\\")
@@ -292,15 +237,15 @@ def imprimir(resultado: Dict) -> None:
         print(f"Instancias con algún leg fallido: {resultado['instancias_leg_fallidas']}")
     if resultado["instancias_leg_generacion_fallidas"]:
         print(f"Instancias no generables en legs (poi = None): {resultado['instancias_leg_generacion_fallidas']}")
-    print("\nTabla 1 (búsqueda):")
-    for grupo, entrada in resultado["tabla1_busqueda"].items():
-        print(f"  {NOMBRES.get(grupo, grupo)}: n={entrada['n_instancias']}, "
-              f"interés entr. {celda(entrada['interes_entregado'])}, "
-              f"batería {celda(entrada['bateria_gastada_total'])}")
-    print("\nTabla 2 (metaheurísticas por buscador, A* como una fila más):")
-    for bus, fila in resultado["tabla_interaccion_busqueda_meta"].items():
-        print(f"  {NOMBRES.get(bus, bus)}: " + ", ".join(
-            f"{NOMBRES.get(meta, meta)}: {celda(v)}" for meta, v in fila.items()))
+    for titulo, tabla in [
+        ("Tabla 1 (búsqueda)", resultado["tabla1_busqueda"]),
+        ("Tabla 2 (metaheurísticas)", resultado["tabla2_metaheuristicas"]),
+    ]:
+        print(f"\n{titulo}:")
+        for grupo, entrada in tabla.items():
+            print(f"  {NOMBRES.get(grupo, grupo)}: n={entrada['n_instancias']}, "
+                  f"interés entr. {celda(entrada['interes_entregado'])}, "
+                  f"batería {celda(entrada['bateria_gastada_total'])}")
     print("\nTabla 3 (interés entregado por nº de POIs):")
     for etiqueta in ["busqueda", "meta"]:
         for grupo, por_pois in resultado["tabla3_interes_por_pois"].get(etiqueta, {}).items():
@@ -314,7 +259,7 @@ def imprimir(resultado: Dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Estadísticas de las Tablas 1-4 desde el JSONL del experimento, con la Tabla 2 como interacción buscador x meta")
+    parser = argparse.ArgumentParser(description="Estadísticas de las Tablas 1-4 desde el JSONL del experimento")
     parser.add_argument("--entrada", default="resultados_representativo.jsonl")
     parser.add_argument("--salida", default="tablas_resultados.json")
     parser.add_argument("--latex", default="tablas_resultados.tex")
